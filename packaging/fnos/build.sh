@@ -26,15 +26,13 @@ if [ ! -f "${PACK_DIR}/manifest" ]; then
 fi
 
 APPNAME="$(sed -n 's/^appname[[:space:]]*=[[:space:]]*//p' "${PACK_DIR}/manifest" | head -n 1 | tr -d '[:space:]')"
-VERSION="$(sed -n 's/^version[[:space:]]*=[[:space:]]*//p' "${PACK_DIR}/manifest" | head -n 1 | tr -d '[:space:]')"
+MANIFEST_VERSION="$(sed -n 's/^version[[:space:]]*=[[:space:]]*//p' "${PACK_DIR}/manifest" | head -n 1 | tr -d '[:space:]')"
 APPNAME="${APPNAME:-go-music-dl}"
-VERSION="${VERSION:-0.0.0}"
 
-# 版本号以程序内的 AppVersion 为准，避免 manifest 与二进制版本漂移。
+# 版本号优先级：PKG_VERSION 环境变量 > core/version.go 的 AppVersion > manifest。
+# 需要发布只包含打包或修复改动、且能覆盖安装的升级包时，用 PKG_VERSION 指定更高版本。
 APP_VERSION="$(sed -n 's/.*AppVersion[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "${ROOT_DIR}/core/version.go" | head -n 1)"
-if [ -n "${APP_VERSION}" ]; then
-    VERSION="${APP_VERSION}"
-fi
+VERSION="${PKG_VERSION:-${APP_VERSION:-${MANIFEST_VERSION:-0.0.0}}}"
 
 mkdir -p "${DIST_DIR}"
 
