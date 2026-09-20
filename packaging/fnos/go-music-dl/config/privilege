@@ -1,0 +1,7 @@
+{
+    "defaults": {
+        "run-as": "package"
+    },
+    "username": "go-music-dl",
+    "groupname": "go-music-dl"
+}

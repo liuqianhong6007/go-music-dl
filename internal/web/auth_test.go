@@ -223,7 +223,7 @@ func TestAuthRequiredRedirectsWhenSetupMissing(t *testing.T) {
 	router := gin.New()
 	router.Use(authRequired(func() (core.WebAuthSettings, error) {
 		return core.WebAuthSettings{Username: core.DefaultWebAuthUsername}, nil
-	}))
+	}, routeAuthOptions{}))
 	router.GET(RoutePrefix, func(c *gin.Context) {
 		c.String(http.StatusOK, "ok")
 	})
@@ -256,7 +256,7 @@ func TestAuthRequiredAllowsSignedSession(t *testing.T) {
 	router := gin.New()
 	router.Use(authRequired(func() (core.WebAuthSettings, error) {
 		return settings, nil
-	}))
+	}, routeAuthOptions{}))
 	router.GET(RoutePrefix, func(c *gin.Context) {
 		username, _ := c.Get("AuthUsername")
 		c.String(http.StatusOK, username.(string))
@@ -304,7 +304,7 @@ func TestConfigAuthOnlyProtectsConfigRoutes(t *testing.T) {
 	configAPI := api.Group("")
 	configAPI.Use(authRequired(func() (core.WebAuthSettings, error) {
 		return core.WebAuthSettings{Username: core.DefaultWebAuthUsername}, nil
-	}))
+	}, routeAuthOptions{}))
 	api.GET("", func(c *gin.Context) {
 		c.String(http.StatusOK, "public")
 	})

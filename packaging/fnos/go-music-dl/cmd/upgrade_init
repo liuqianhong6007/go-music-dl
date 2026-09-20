@@ -1,0 +1,10 @@
+#!/bin/bash
+
+### 升级前执行：停止旧进程，避免二进制被占用。
+
+CMD_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -x "${CMD_DIR}/main" ]; then
+    "${CMD_DIR}/main" stop
+fi
+
+exit 0

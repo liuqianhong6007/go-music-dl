@@ -250,8 +250,29 @@ func wantsHTML(c *gin.Context) bool {
 	return accept == "" || strings.Contains(accept, "text/html")
 }
 
-func authRequired(provider authSettingsProvider) gin.HandlerFunc {
+// routeAuthOptions 描述一组路由的鉴权要求。
+type routeAuthOptions struct {
+	// gatewayAuth 为 true 时，来自飞牛 fnOS 统一网关（Unix Socket 连接 +
+	// X-Trim-* 身份头）的请求直接视为已登录，无需内置账号会话。
+	gatewayAuth bool
+	// adminOnly 为 true 时还要求管理员身份：网关身份看 X-Trim-Isadmin，
+	// 内置账号会话本身即管理员。
+	adminOnly bool
+}
+
+// authRequired 校验登录态。
+func authRequired(provider authSettingsProvider, authOpts routeAuthOptions) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if identity, ok := trustedGatewayIdentity(c, authOpts.gatewayAuth); ok {
+			setGatewayAuthContext(c, identity)
+			if authOpts.adminOnly && !identity.IsAdmin {
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "当前飞牛账号不是管理员，无法进行系统配置操作"})
+				return
+			}
+			c.Next()
+			return
+		}
+
 		settings, err := provider()
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "读取登录配置失败"})
@@ -269,7 +290,9 @@ func authRequired(provider authSettingsProvider) gin.HandlerFunc {
 
 		value, err := c.Cookie(authCookieName)
 		if err == nil && validateSessionValue(settings, value, time.Now()) {
-			c.Set("AuthUsername", settings.Username)
+			c.Set(ctxKeyAuthUsername, settings.Username)
+			c.Set(ctxKeyAuthIsAdmin, true)
+			c.Set(ctxKeyAuthSource, authSourceLocal)
 			c.Next()
 			return
 		}
@@ -306,8 +329,21 @@ func renderAuthPage(c *gin.Context, mode string, errMsg string, username string)
 	})
 }
 
-func bindAuthRoutes(api *gin.RouterGroup) {
+// redirectGatewayAuthed 在飞牛网关已经确认登录态时，把登录/初始化页面重定向回应用，
+// 避免用户看到多余的应用内登录页。
+func redirectGatewayAuthed(c *gin.Context, gatewayAuth bool) bool {
+	if _, ok := trustedGatewayIdentity(c, gatewayAuth); !ok {
+		return false
+	}
+	c.Redirect(http.StatusFound, safeAuthRedirectTarget(c.Query("next")))
+	return true
+}
+
+func bindAuthRoutes(api *gin.RouterGroup, gatewayAuth bool) {
 	api.GET("/setup", func(c *gin.Context) {
+		if redirectGatewayAuthed(c, gatewayAuth) {
+			return
+		}
 		settings, err := core.GetWebAuthSettings()
 		if err != nil {
 			renderAuthPage(c, "setup", "读取登录配置失败", core.DefaultWebAuthUsername)
@@ -383,6 +419,9 @@ func bindAuthRoutes(api *gin.RouterGroup) {
 	})
 
 	api.GET("/login", func(c *gin.Context) {
+		if redirectGatewayAuthed(c, gatewayAuth) {
+			return
+		}
 		settings, err := core.GetWebAuthSettings()
 		if err != nil {
 			renderAuthPage(c, "login", "读取登录配置失败", "")

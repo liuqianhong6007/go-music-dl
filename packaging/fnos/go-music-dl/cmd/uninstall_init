@@ -1,0 +1,10 @@
+#!/bin/bash
+
+### 卸载前执行：停止进程。
+
+CMD_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -x "${CMD_DIR}/main" ]; then
+    "${CMD_DIR}/main" stop
+fi
+
+exit 0

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -365,6 +366,22 @@ type StartOptions struct {
 	DisableAuth       bool
 	ListenHost        string
 	BasePath          string
+	// GatewayAuth 为 true 时，来自 ListenUnixSocket 的请求若带有飞牛 fnOS
+	// 统一网关注入的用户身份头，则直接视为已登录。
+	GatewayAuth bool
+	// ListenUnixSocket 非空时在该 Unix Socket 上提供服务，供飞牛 fnOS 统一网关转发。
+	ListenUnixSocket string
+	// DisableTCP 为 true 时不监听 TCP 端口（仅使用 Unix Socket）。
+	DisableTCP bool
+	// RequireLogin 为 true 时，搜索、下载等业务路由同样要求登录。
+	// 默认保持项目原有行为：普通功能公开，只有系统配置类操作需要登录。
+	RequireLogin bool
+	// AdminOnlyConfig 为 true 时，系统配置类操作还要求管理员身份。
+	AdminOnlyConfig bool
+	// UnixSocketMode 设置 Unix Socket 文件权限，取八进制字符串，例如 "0660"。
+	// 留空时：启用 GatewayAuth 用 0666（飞牛 fnOS 网关可能以其他用户连接），
+	// 否则保持系统默认权限。
+	UnixSocketMode string
 }
 
 func Start(port string, shouldOpenBrowser bool, basePath string) {
@@ -393,6 +410,95 @@ func StartWithOptions(port string, opts StartOptions) {
 	defer CloseDB()
 	syncLocalMusicIndexAsync()
 
+	r := newEngine(opts)
+
+	server := &http.Server{Handler: r, ConnContext: withGatewayConn}
+	listeners := make([]net.Listener, 0, 2)
+
+	socketPath := strings.TrimSpace(opts.ListenUnixSocket)
+	if socketPath != "" {
+		// 上次异常退出可能残留 socket 文件，先清掉避免 listen 报 address already in use。
+		if err := os.Remove(socketPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "Failed to clean up unix socket %s: %v\n", socketPath, err)
+			return
+		}
+		if dir := filepath.Dir(socketPath); dir != "" && dir != "." {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to create unix socket directory %s: %v\n", dir, err)
+				return
+			}
+		}
+		unixListener, err := net.Listen("unix", socketPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to start web server on unix socket %s: %v\n", socketPath, err)
+			return
+		}
+		socketMode, modeErr := unixSocketFileMode(opts)
+		if modeErr != nil {
+			fmt.Fprintf(os.Stderr, "Invalid unix socket mode %q: %v\n", opts.UnixSocketMode, modeErr)
+			return
+		}
+		if socketMode != 0 {
+			// 该 socket 位于应用私有目录，只供本机飞牛 fnOS 网关转发使用。
+			// 网关进程可能以其他用户身份连接，因此默认放开连接权限；
+			// 可用 --unix-socket-mode 收紧到 0660 / 0600。
+			if err := os.Chmod(socketPath, socketMode); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to adjust unix socket permission: %v\n", err)
+			}
+		}
+		listeners = append(listeners, unixListener)
+	}
+
+	if !opts.DisableTCP {
+		listenAddr := opts.ListenHost + ":" + port
+		listener, err := net.Listen("tcp", listenAddr)
+		if err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "address already in use") {
+				fmt.Fprintf(os.Stderr, "Failed to start web server: port %s is already in use. Please use --port to specify another port, e.g. music-dl web --port 8081\n", port)
+				return
+			}
+			fmt.Fprintf(os.Stderr, "Failed to start web server on %s: %v\n", listenAddr, err)
+			return
+		}
+		listeners = append(listeners, listener)
+
+		urlHost := opts.ListenHost
+		if urlHost == "" || urlHost == "0.0.0.0" || urlHost == "::" {
+			urlHost = "localhost"
+		}
+		urlStr := "http://" + urlHost + ":" + port + RoutePrefix
+		fmt.Printf("Web started at %s\n", urlStr)
+		if opts.ShouldOpenBrowser {
+			go func() { time.Sleep(500 * time.Millisecond); core.OpenBrowser(urlStr) }()
+		}
+	}
+
+	if socketPath != "" {
+		fmt.Printf("fnOS gateway socket: %s (base path %s)\n", socketPath, RoutePrefix)
+	}
+	if len(listeners) == 0 {
+		fmt.Fprintln(os.Stderr, "Failed to start web server: no listener enabled")
+		return
+	}
+
+	errCh := make(chan error, len(listeners))
+	for _, listener := range listeners {
+		go func(l net.Listener) { errCh <- server.Serve(l) }(listener)
+	}
+	for range listeners {
+		if err := <-errCh; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			fmt.Fprintf(os.Stderr, "Web server stopped with error: %v\n", err)
+		}
+	}
+}
+
+// newEngine 构建完整的 Web 路由。抽成独立函数便于在测试里直接校验路由鉴权，
+// 无需真正监听端口。调用方需自行完成数据库初始化等准备工作。
+func newEngine(opts StartOptions) *gin.Engine {
+	return newEngineWithProvider(opts, core.GetWebAuthSettings)
+}
+
+func newEngineWithProvider(opts StartOptions, provider authSettingsProvider) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 	r.Use(corsMiddleware())
@@ -440,18 +546,21 @@ func StartWithOptions(port string, opts StartOptions) {
 	api.GET("/videogen.css", func(c *gin.Context) { c.FileFromFS("templates/static/css/videogen.css", http.FS(templateFS)) })
 	api.GET("/videogen.js", func(c *gin.Context) { c.FileFromFS("templates/static/js/videogen.js", http.FS(templateFS)) })
 	api.GET("/app.js", func(c *gin.Context) { c.FileFromFS("templates/static/js/app.js", http.FS(templateFS)) })
-	configAPI := bindAuthMiddleware(api, opts)
-	api.Static("/videos", videoDir)
+	// 路由分为三层：公开资源、需要登录的业务路由、系统配置路由。
+	// 默认只有系统配置需要登录（与 README 描述一致）；--require-login 会把业务路由
+	// 也纳入登录校验，飞牛 fnOS 网关身份可以直接满足该要求。
+	routes := bindAuthMiddlewareWithProvider(api, opts, provider)
+	routes.protected.Static("/videos", videoDir)
 
-	api.GET("/render", func(c *gin.Context) {
+	routes.protected.GET("/render", func(c *gin.Context) {
 		c.HTML(200, "render.html", gin.H{
 			"Root": RoutePrefix,
 		})
 	})
 
-	configAPI.HEAD("/cookies", func(c *gin.Context) { c.Status(http.StatusNoContent) })
-	configAPI.GET("/cookies", func(c *gin.Context) { c.JSON(200, core.CM.GetAll()) })
-	configAPI.POST("/cookies", func(c *gin.Context) {
+	routes.config.HEAD("/cookies", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	routes.config.GET("/cookies", func(c *gin.Context) { c.JSON(200, core.CM.GetAll()) })
+	routes.config.POST("/cookies", func(c *gin.Context) {
 		var req map[string]string
 		if err := c.ShouldBindJSON(&req); err == nil {
 			core.CM.SetAll(req)
@@ -465,7 +574,7 @@ func StartWithOptions(port string, opts StartOptions) {
 	api.GET("/settings", func(c *gin.Context) {
 		c.JSON(200, publicWebSettings())
 	})
-	configAPI.POST("/settings", func(c *gin.Context) {
+	routes.config.POST("/settings", func(c *gin.Context) {
 		var req core.WebSettings
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid settings payload"})
@@ -478,44 +587,71 @@ func StartWithOptions(port string, opts StartOptions) {
 		c.JSON(200, publicWebSettings())
 	})
 
-	RegisterMusicRoutes(api, configAPI)
-	RegisterQRLoginRoutes(configAPI)
-	RegisterCollectionRoutes(api)
-	RegisterLocalMusicRoutes(api)
-	RegisterVideogenRoutes(api, videoDir)
-	RegisterUpdateRoutes(api)
+	RegisterMusicRoutes(routes.protected, routes.config)
+	// 扫码登录会写入平台 Cookie，属于系统配置操作，按 README 的说明需要管理员登录。
+	RegisterQRLoginRoutes(routes.config)
+	RegisterCollectionRoutes(routes.protected)
+	RegisterLocalMusicRoutes(routes.protected)
+	RegisterVideogenRoutes(routes.protected, videoDir)
+	RegisterUpdateRoutes(routes.protected)
 
-	listenAddr := opts.ListenHost + ":" + port
-	listener, err := net.Listen("tcp", listenAddr)
-	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "address already in use") {
-			fmt.Fprintf(os.Stderr, "Failed to start web server: port %s is already in use. Please use --port to specify another port, e.g. music-dl web --port 8081\n", port)
-			return
-		}
-		fmt.Fprintf(os.Stderr, "Failed to start web server on %s: %v\n", listenAddr, err)
-		return
-	}
-
-	urlHost := opts.ListenHost
-	if urlHost == "" || urlHost == "0.0.0.0" || urlHost == "::" {
-		urlHost = "localhost"
-	}
-	urlStr := "http://" + urlHost + ":" + port + RoutePrefix
-	fmt.Printf("Web started at %s\n", urlStr)
-	if opts.ShouldOpenBrowser {
-		go func() { time.Sleep(500 * time.Millisecond); core.OpenBrowser(urlStr) }()
-	}
-	if err := http.Serve(listener, r); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		fmt.Fprintf(os.Stderr, "Web server stopped with error: %v\n", err)
-	}
+	return r
 }
 
-func bindAuthMiddleware(api *gin.RouterGroup, opts StartOptions) *gin.RouterGroup {
-	bindAuthRoutes(api)
+// appRouteGroups 把应用路由分成三层：
+//   - public：无需登录，例如静态资源、健康检查和登录页。
+//   - protected：搜索、下载等业务路由。默认公开（与项目原有行为一致），
+//     开启 StartOptions.RequireLogin 后要求登录。
+//   - config：系统配置类操作（Cookie、系统设置、扫码登录写入 Cookie）。
+//     始终要求登录，开启 StartOptions.AdminOnlyConfig 后额外要求管理员身份。
+type appRouteGroups struct {
+	public    *gin.RouterGroup
+	protected *gin.RouterGroup
+	config    *gin.RouterGroup
+}
+
+func bindAuthMiddleware(api *gin.RouterGroup, opts StartOptions) appRouteGroups {
+	return bindAuthMiddlewareWithProvider(api, opts, core.GetWebAuthSettings)
+}
+
+func bindAuthMiddlewareWithProvider(api *gin.RouterGroup, opts StartOptions, provider authSettingsProvider) appRouteGroups {
+	bindAuthRoutes(api, opts.GatewayAuth)
 	if opts.DisableAuth {
-		return api
+		return appRouteGroups{public: api, protected: api, config: api}
 	}
-	configAPI := api.Group("")
-	configAPI.Use(authRequired(core.GetWebAuthSettings))
-	return configAPI
+
+	protected := api
+	if opts.RequireLogin {
+		protected = api.Group("")
+		protected.Use(authRequired(provider, routeAuthOptions{gatewayAuth: opts.GatewayAuth}))
+	}
+
+	// 系统配置类操作始终需要登录，这一点不受 RequireLogin 影响。
+	config := api.Group("")
+	config.Use(authRequired(provider, routeAuthOptions{
+		gatewayAuth: opts.GatewayAuth,
+		adminOnly:   opts.AdminOnlyConfig,
+	}))
+
+	return appRouteGroups{public: api, protected: protected, config: config}
+}
+
+// unixSocketFileMode 解析 Unix Socket 权限。返回 0 表示保持系统默认权限。
+func unixSocketFileMode(opts StartOptions) (os.FileMode, error) {
+	mode := strings.TrimSpace(opts.UnixSocketMode)
+	if mode == "" {
+		if opts.GatewayAuth {
+			// 飞牛 fnOS 网关可能以其他用户身份连接 socket，默认放开连接权限。
+			return 0o666, nil
+		}
+		return 0, nil
+	}
+	parsed, err := strconv.ParseUint(strings.TrimPrefix(mode, "0o"), 8, 32)
+	if err != nil {
+		return 0, err
+	}
+	if parsed > 0o777 {
+		return 0, fmt.Errorf("mode %s is out of range", mode)
+	}
+	return os.FileMode(parsed), nil
 }

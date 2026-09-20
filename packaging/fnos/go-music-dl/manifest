@@ -1,0 +1,15 @@
+appname               = go-music-dl
+version               = 1.1.1
+display_name          = 音乐下载
+desc                  = 音乐搜索与下载工具，通过飞牛 fnOS 统一网关复用 NAS 登录态，在桌面直接打开即可使用。
+platform              = x86
+source                = thirdparty
+maintainer            = your-name
+maintainer_url        = https://github.com/guohuiyuan/go-music-dl
+distributor           = your-name
+distributor_url       = https://github.com/guohuiyuan/go-music-dl
+desktop_uidir         = ui
+desktop_applaunchname = go-music-dl.main
+ctl_stop              = true
+checkport             = false
+changelog             = 首个 fnOS 应用包：统一网关登录态接入，无需应用内二次登录。

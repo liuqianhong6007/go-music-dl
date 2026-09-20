@@ -1,0 +1,118 @@
+#!/bin/bash
+
+# go-music-dl 生命周期脚本。
+# 通过 Unix Socket 对接飞牛 fnOS 统一网关：请求先由 fnOS 校验 NAS 登录态，
+# 再把当前用户身份（X-Trim-Userid / X-Trim-Username / X-Trim-Isadmin）转发给应用。
+
+BIN="${TRIM_APPDEST}/bin/music-dl"
+SOCKET="${TRIM_APPDEST}/go-music-dl.sock"
+BASE_PATH="/app/go-music-dl"
+LOG_FILE="${TRIM_PKGVAR}/music-dl.log"
+PID_FILE="${TRIM_PKGVAR}/app.pid"
+
+log_msg() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "${LOG_FILE}"
+}
+
+read_pid() {
+    if [ -r "${PID_FILE}" ]; then
+        head -n 1 "${PID_FILE}" | tr -d '[:space:]'
+    fi
+}
+
+check_process() {
+    local pid="$1"
+    [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null
+}
+
+status_app() {
+    local pid
+    pid="$(read_pid)"
+    if check_process "${pid}"; then
+        return 0
+    fi
+    rm -f "${PID_FILE}"
+    return 1
+}
+
+start_app() {
+    if status_app; then
+        return 0
+    fi
+
+    if [ ! -x "${BIN}" ]; then
+        echo "未找到可执行文件：${BIN}" > "${TRIM_TEMP_LOGFILE}"
+        return 1
+    fi
+
+    mkdir -p "${TRIM_PKGVAR}"
+    log_msg "Starting go-music-dl ..."
+
+    # 以应用数据目录作为工作目录，配置库与下载文件都留在应用自己的存储空间内。
+    cd "${TRIM_PKGVAR}" || return 1
+    MUSIC_DL_CONFIG_DB="${TRIM_PKGVAR}/settings.db" \
+        "${BIN}" web --no-browser --unix-socket "${SOCKET}" --gateway-auth --require-login --base-path "${BASE_PATH}" \
+        >> "${LOG_FILE}" 2>&1 &
+    local pid=$!
+    printf "%s" "${pid}" > "${PID_FILE}"
+
+    # 等待 Socket 就绪，避免应用中心显示已启动但桌面入口打不开。
+    local waited=0
+    while [ ! -S "${SOCKET}" ] && [ "${waited}" -lt 15 ]; do
+        if ! check_process "${pid}"; then
+            echo "go-music-dl 启动失败，请查看 ${LOG_FILE}" > "${TRIM_TEMP_LOGFILE}"
+            return 1
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+
+    if [ ! -S "${SOCKET}" ]; then
+        echo "go-music-dl 启动超时，未创建 Socket：${SOCKET}" > "${TRIM_TEMP_LOGFILE}"
+        return 1
+    fi
+
+    log_msg "go-music-dl started (pid=${pid})"
+    return 0
+}
+
+stop_app() {
+    log_msg "Stopping go-music-dl ..."
+    local pid
+    pid="$(read_pid)"
+
+    if check_process "${pid}"; then
+        kill -TERM "${pid}" >> "${LOG_FILE}" 2>&1
+        local count=0
+        while check_process "${pid}" && [ "${count}" -lt 10 ]; do
+            sleep 1
+            count=$((count + 1))
+        done
+        if check_process "${pid}"; then
+            kill -KILL "${pid}" >> "${LOG_FILE}" 2>&1
+        fi
+    fi
+
+    rm -f "${PID_FILE}"
+    rm -f "${SOCKET}"
+    return 0
+}
+
+case "$1" in
+start)
+    start_app
+    ;;
+stop)
+    stop_app
+    ;;
+status)
+    if status_app; then
+        exit 0
+    fi
+    exit 3
+    ;;
+*)
+    echo "Unknown command: $1" > "${TRIM_TEMP_LOGFILE}"
+    exit 1
+    ;;
+esac
