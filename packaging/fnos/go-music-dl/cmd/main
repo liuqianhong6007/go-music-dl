@@ -1,14 +1,24 @@
 #!/bin/bash
 
 # go-music-dl 生命周期脚本。
-# 通过 Unix Socket 对接飞牛 fnOS 统一网关：请求先由 fnOS 校验 NAS 登录态，
-# 再把当前用户身份（X-Trim-Userid / X-Trim-Username / X-Trim-Isadmin）转发给应用。
+#
+# 两条访问路径并存：
+#   1. 统一网关（Unix Socket）：fnOS 先校验 NAS 登录态，再把当前用户身份
+#      （X-Trim-Userid / X-Trim-Username / X-Trim-Isadmin）转发给应用，
+#      桌面入口走这条，不需要应用内二次登录。
+#   2. 直连 TCP 端口：给安卓客户端等无法携带 NAS 会话的场景用。TCP 上的
+#      身份头一律不被信任，业务接口统一要求内置管理员登录。
+#      端口由 ${TRIM_PKGVAR}/web-port.conf 控制，写 0 即关闭。
 
 BIN="${TRIM_APPDEST}/bin/music-dl"
 SOCKET="${TRIM_APPDEST}/go-music-dl.sock"
 BASE_PATH="/app/go-music-dl"
 LOG_FILE="${TRIM_PKGVAR}/music-dl.log"
 PID_FILE="${TRIM_PKGVAR}/app.pid"
+
+# 直连端口配置。文件内容为纯数字端口；空、0、off、none 表示只监听 Socket。
+PORT_CONF="${TRIM_PKGVAR}/web-port.conf"
+DEFAULT_WEB_PORT="18080"
 
 log_msg() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "${LOG_FILE}"
@@ -23,6 +33,27 @@ read_pid() {
 check_process() {
     local pid="$1"
     [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null
+}
+
+# 解析直连端口，输出空串表示不启用 TCP 监听。
+# 配置文件缺失时写入默认值，方便用户发现并修改，而不是只能读文档。
+resolve_web_port() {
+    if [ ! -f "${PORT_CONF}" ]; then
+        printf '%s\n' "${DEFAULT_WEB_PORT}" > "${PORT_CONF}" 2>/dev/null
+    fi
+
+    local configured
+    configured="$(head -n 1 "${PORT_CONF}" 2>/dev/null | tr -d '[:space:]')"
+
+    case "${configured}" in
+    "" | 0 | off | none) return 0 ;;
+    esac
+    # 只接受纯数字，避免把任意内容拼进命令行。
+    case "${configured}" in
+    *[!0-9]*) return 0 ;;
+    esac
+
+    printf '%s' "${configured}"
 }
 
 status_app() {
@@ -48,10 +79,21 @@ start_app() {
     mkdir -p "${TRIM_PKGVAR}"
     log_msg "Starting go-music-dl ..."
 
+    # 直连端口：为空则只监听 Unix Socket。
+    local port port_arg=""
+    port="$(resolve_web_port)"
+    if [ -n "${port}" ]; then
+        port_arg="--port ${port}"
+        log_msg "直连端口已启用：${port}（业务接口仍需登录内置管理员账号）"
+    else
+        log_msg "直连端口未启用，仅统一网关可通过 Unix Socket 访问"
+    fi
+
     # 以应用数据目录作为工作目录，配置库与下载文件都留在应用自己的存储空间内。
     cd "${TRIM_PKGVAR}" || return 1
+    # shellcheck disable=SC2086  # port_arg 需要按空格拆成 --port 与端口号两个参数
     MUSIC_DL_CONFIG_DB="${TRIM_PKGVAR}/settings.db" \
-        "${BIN}" web --no-browser --unix-socket "${SOCKET}" --gateway-auth --require-login --base-path "${BASE_PATH}" \
+        "${BIN}" web --no-browser --unix-socket "${SOCKET}" --gateway-auth --require-login --base-path "${BASE_PATH}" ${port_arg} \
         >> "${LOG_FILE}" 2>&1 &
     local pid=$!
     printf "%s" "${pid}" > "${PID_FILE}"
