@@ -350,6 +350,8 @@ func playlistCategoryPlaylistsURL(source string, category model.PlaylistCategory
 }
 
 func RegisterMusicRoutes(api, configAPI *gin.RouterGroup) {
+	// 给第三方客户端用的 JSON 搜索接口（与 /search 同一鉴权层级）。
+	registerSearchAPIRoutes(api)
 
 	api.GET("/", func(c *gin.Context) {
 		renderIndex(c, nil, nil, "", nil, "", "song", "", "", "", false, "", nil)
