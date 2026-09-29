@@ -23,9 +23,18 @@ func allowSameOriginWrite(c *gin.Context) bool {
 		return false
 	}
 
-	// 现代浏览器都会带上 Sec-Fetch-Site，且页面脚本无法伪造，优先采信。
+	// 现代浏览器都会带上 Sec-Fetch-Site，且页面脚本无法伪造（`Sec-` 前缀属于
+	// fetch 规范里的禁止头名），因此可以优先采信。
+	//
+	// 只收 same-origin 与 none：
+	//   - same-origin：浏览器确认请求确实来自同源页面；
+	//   - none：用户直接发起（地址栏 / 书签），不是脚本能构造的场景。
+	//
+	// **不收 same-site**：它只代表注册域相同，跨子域、跨 DDNS 租户依然属于不同源。
+	// 采信它会直接跳过下面的 Origin 校验，而 CORS 中间件又放行了 X-Requested-With，
+	// 预检能通过——于是同注册域下的攻击者页面就能 CSRF 触发 save_local 往 NAS 写文件。
 	switch strings.ToLower(strings.TrimSpace(c.GetHeader("Sec-Fetch-Site"))) {
-	case "same-origin", "same-site", "none":
+	case "same-origin", "none":
 		return true
 	}
 
@@ -45,8 +54,11 @@ func allowSameOriginWrite(c *gin.Context) bool {
 		return false
 	}
 
+	// 没有 Origin：浏览器对非 GET/HEAD 的跨源请求都会带 Origin，所以走到这里的
+	// 基本是原生客户端（既不发送 Origin 也不发送 Sec-Fetch-Site）。同样不收
+	// same-site，避免任何「注册域相同即可信」的隐式放行。
 	secFetchSite := strings.TrimSpace(strings.ToLower(c.GetHeader("Sec-Fetch-Site")))
-	return secFetchSite == "" || secFetchSite == "same-origin" || secFetchSite == "same-site" || secFetchSite == "none"
+	return secFetchSite == "" || secFetchSite == "same-origin" || secFetchSite == "none"
 }
 
 // requestHostCandidates 列出可用于同源比较的请求主机。
