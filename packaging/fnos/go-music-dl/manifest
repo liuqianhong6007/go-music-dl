@@ -12,4 +12,4 @@ desktop_uidir         = ui
 desktop_applaunchname = go-music-dl.main
 ctl_stop              = true
 checkport             = false
-changelog             = 首个 fnOS 应用包：统一网关登录态接入，无需应用内二次登录。
+changelog             = 新增直连 TCP 端口（默认 18080，可在 web-port.conf 改为 0 关闭），供安卓客户端等无法携带 NAS 会话的场景直连；桌面入口继续走统一网关。

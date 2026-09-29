@@ -56,7 +56,8 @@ for target in ${TARGETS}; do
     cp -R "${PACK_DIR}/." "${build_dir}/"
     mkdir -p "${build_dir}/app/bin" "${build_dir}/wizard"
 
-    # 应用只监听 Unix Socket（由统一网关转发），因此不需要 TCP 端口。
+    # 桌面入口走 Unix Socket（由统一网关转发）；另有直连 TCP 端口供安卓等
+    # 客户端使用，端口在运行时由 cmd/main 读取 ${TRIM_PKGVAR}/web-port.conf 决定。
     CGO_ENABLED=0 GOOS="${goos}" GOARCH="${goarch}" \
         go build -trimpath -ldflags "-s -w" \
         -o "${build_dir}/app/bin/music-dl" "${ROOT_DIR}/cmd/music-dl"
