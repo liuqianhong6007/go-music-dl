@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/base64"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBridgeRoutesOnlyBrowserDownloadsExternally(t *testing.T) {
@@ -24,12 +26,13 @@ func TestBridgeRoutesOnlyBrowserDownloadsExternally(t *testing.T) {
 func TestBridgeReportsPlaybackState(t *testing.T) {
 	for _, want := range []string{
 		"musicDlPlaybackState",
+		"musicDlPlaybackMetadata",
 		`notifyPlaybackState("playing")`,
 		`notifyPlaybackState("paused")`,
 		`notifyPlaybackState("ended")`,
-		`notifyPlaybackState("released")`,
 		`bindAPlayerPlayback`,
 		`window.ap.audio === audio`,
+		`setInterval(notifyPlaybackMetadata, 1000)`,
 	} {
 		if !strings.Contains(bridgeScript, want) {
 			t.Fatalf("bridgeScript missing playback token %q", want)
@@ -37,14 +40,46 @@ func TestBridgeReportsPlaybackState(t *testing.T) {
 	}
 }
 
+func TestBridgeDoesNotStopPlaybackOnPageHide(t *testing.T) {
+	if strings.Contains(bridgeScript, `window.addEventListener("pagehide"`) {
+		t.Fatal("pagehide is not a reliable Android stop signal and must not tear down background playback")
+	}
+}
+
+func TestHandlePlaybackMetadataDoesNotOpenURL(t *testing.T) {
+	app := newDesktopApp(nil, nil)
+	app.handleWebViewMessage(`playback_metadata:{"title":"Song","artist":"Artist","album":"Album","positionMs":1200,"durationMs":180000,"playing":true}`)
+	if app.pendingExternalOpenTo != nil {
+		t.Fatalf("playback metadata should not be treated as URL: %s", app.pendingExternalOpenTo)
+	}
+	if app.playbackMetadata.Title != "Song" || app.playbackMetadata.PositionMS != 1200 {
+		t.Fatalf("unexpected playback metadata: %+v", app.playbackMetadata)
+	}
+	if !app.playbackActive {
+		t.Fatal("playing metadata should recover a missed play event")
+	}
+}
+
 func TestBridgeReportsAppLoadState(t *testing.T) {
 	for _, want := range []string{
 		"musicDlAppState",
+		`notifyAppState("bridge")`,
 		`notifyAppState("loaded")`,
 	} {
 		if !strings.Contains(bridgeScript, want) {
 			t.Fatalf("bridgeScript missing app state token %q", want)
 		}
+	}
+}
+
+func TestBridgeAcknowledgesBeforeDOMContentLoaded(t *testing.T) {
+	bridgeIndex := strings.Index(bridgeScript, `notifyAppState("bridge")`)
+	domReadyIndex := strings.Index(bridgeScript, `document.addEventListener("DOMContentLoaded"`)
+	if bridgeIndex < 0 || domReadyIndex < 0 {
+		t.Fatal("bridgeScript is missing bridge or DOMContentLoaded acknowledgement")
+	}
+	if bridgeIndex > domReadyIndex {
+		t.Fatal("bridge acknowledgement should run immediately, before waiting for DOMContentLoaded")
 	}
 }
 
@@ -97,6 +132,87 @@ func TestHandleWebViewMessageAppStateDoesNotOpenURL(t *testing.T) {
 	}
 	if !app.initialNavAcked {
 		t.Fatal("state:loaded should acknowledge the initial navigation")
+	}
+}
+
+func TestBridgeStateStopsAutomaticNavigationRetries(t *testing.T) {
+	app := newDesktopApp(nil, nil)
+	app.navigationAttempts = initialNavMaxAttempts
+	app.navigationFailed = true
+	app.initialNavSentAt = time.Now().Add(-initialNavRetryInterval)
+
+	app.handleWebViewMessage("state:bridge")
+
+	if !app.initialNavAcked {
+		t.Fatal("state:bridge should acknowledge that the WebView bridge is alive")
+	}
+	if app.navigationAttempts != 0 || app.navigationFailed {
+		t.Fatalf("bridge acknowledgement did not reset retries: attempts=%d failed=%v", app.navigationAttempts, app.navigationFailed)
+	}
+	if got := app.navigationRecoveryAction(time.Now()); got != navigationRecoveryWait {
+		t.Fatalf("recovery action after bridge acknowledgement = %v, want wait", got)
+	}
+}
+
+func TestNavigationRecoveryBecomesBoundedDiagnostic(t *testing.T) {
+	app := newDesktopApp(nil, nil)
+	app.initialNavReady = true
+	app.callbackRegistered = true
+	app.initialNavSentAt = time.Now().Add(-initialNavRetryInterval)
+	app.navigationAttempts = initialNavMaxAttempts - 1
+
+	if got := app.navigationRecoveryAction(time.Now()); got != navigationRecoveryRetry {
+		t.Fatalf("recovery action before limit = %v, want retry", got)
+	}
+	app.navigationAttempts = initialNavMaxAttempts
+	if got := app.navigationRecoveryAction(time.Now()); got != navigationRecoveryShowDiagnostic {
+		t.Fatalf("recovery action at limit = %v, want diagnostic", got)
+	}
+	app.navigationFailed = true
+	if got := app.navigationRecoveryAction(time.Now().Add(time.Hour)); got != navigationRecoveryWait {
+		t.Fatalf("recovery action after diagnostic = %v, want wait", got)
+	}
+}
+
+func TestNavigationDiagnosticContainsActionableState(t *testing.T) {
+	target := "http://127.0.0.1:37777/music/search?q=%E5%91%A8%E6%9D%B0%E4%BC%A6"
+	dataURL := navigationDiagnosticDataURL(target, initialNavMaxAttempts, "not received", "ios", "arm64", "go1.25.1")
+	const prefix = "data:text/html;charset=utf-8;base64,"
+	if !strings.HasPrefix(dataURL, prefix) {
+		t.Fatalf("diagnostic URL has unexpected prefix: %.80s", dataURL)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(dataURL, prefix))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(decoded)
+	for _, want := range []string{target, "5", "ios/arm64", "go1.25.1", "重新尝试"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("diagnostic page missing %q", want)
+		}
+	}
+}
+
+func TestRetryFromNavigationDiagnosticStartsNewRecoveryCycle(t *testing.T) {
+	target := "http://127.0.0.1:37777/music/"
+	app := newDesktopApp(nil, nil)
+	app.initialNavReady = true
+	app.navigationFailed = true
+	app.initialNavAcked = true
+
+	app.handleNavigationEvent(target)
+
+	if app.navigationFailed {
+		t.Fatal("navigation from the diagnostic retry link should leave the failed state")
+	}
+	if app.navigationAttempts != 1 {
+		t.Fatalf("navigationAttempts = %d, want 1", app.navigationAttempts)
+	}
+	if app.initialNavAcked {
+		t.Fatal("retry navigation should wait for a fresh bridge acknowledgement")
+	}
+	if app.currentWebURL != target {
+		t.Fatalf("currentWebURL = %q, want %q", app.currentWebURL, target)
 	}
 }
 

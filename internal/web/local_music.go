@@ -54,6 +54,7 @@ var localMusicCoverExts = []string{".jpg", ".jpeg", ".png", ".webp", ".bmp", ".g
 var localMusicLyricExts = []string{".lrc", ".txt", ".lyric"}
 var localMusicMetaCacheMu sync.RWMutex
 var localMusicMetaCache = make(map[string]*localMusicTrack)
+var localMusicMetaCacheRoot string
 var localMusicScanCacheMu sync.RWMutex
 var localMusicScanCache localMusicScanSnapshot
 var localMusicScanRefreshMu sync.Mutex
@@ -62,7 +63,7 @@ var autoCacheMu sync.Mutex
 var autoCacheInFlight = make(map[string]struct{})
 var autoCacheSlots = make(chan struct{}, autoCacheMaxConcurrent)
 var autoCacheSaveSong = core.SaveSongToFileWithTemplate
-var autoCacheIndexSavedSong = indexAutoCachedLocalMusic
+var autoCacheIndexSavedSong = indexSavedLocalMusicFile
 var autoCacheSettingsProvider = core.GetWebSettings
 
 type localMusicScanSnapshot struct {
@@ -176,9 +177,9 @@ func releaseAutoCache(key string) {
 	<-autoCacheSlots
 }
 
-// indexAutoCachedLocalMusic indexes the file that was just written instead of
-// rescanning the entire download directory after every playback cache.
-func indexAutoCachedLocalMusic(result *core.DownloadedSong, downloadDir string) {
+// indexSavedLocalMusicFile indexes the file that was just written instead of
+// rescanning the entire download directory after every download or cache.
+func indexSavedLocalMusicFile(result *core.DownloadedSong, downloadDir string) {
 	if result == nil || strings.TrimSpace(result.SavedPath) == "" {
 		return
 	}
@@ -226,12 +227,13 @@ func RegisterLocalMusicRoutes(api *gin.RouterGroup) {
 
 	api.GET("/local_music", func(c *gin.Context) {
 		forceRefresh := c.Query("refresh") == "1" || c.Query("force") == "1"
-		offset := parseLocalMusicRangeInt(c.Query("offset"), 0)
+		offset := parseLocalMusicOffset(c.Query("offset"))
 		limit := parseLocalMusicRangeInt(c.Query("limit"), 0)
 
 		// 快速路径：从 SQLite 索引加载（无文件 IO）
 		if !forceRefresh && db != nil {
 			if tracks, total, ok := loadTracksFromIndex(offset, limit); ok && total > 0 {
+				refreshing := refreshLocalMusicScanAsyncIfStale(localMusicDownloadDir())
 				c.JSON(http.StatusOK, gin.H{
 					"download_dir": filepath.ToSlash(localMusicDownloadDir()),
 					"exists":       true,
@@ -240,11 +242,9 @@ func RegisterLocalMusicRoutes(api *gin.RouterGroup) {
 					"offset":       offset,
 					"limit":        limit,
 					"has_more":     offset+len(tracks) < total,
-					"refreshing":   false,
-					"scanned_at":   time.Now(),
+					"refreshing":   refreshing,
+					"scanned_at":   localMusicSnapshotScannedAt(localMusicDownloadDir()),
 				})
-				// 后台异步刷新文件系统变更
-				refreshLocalMusicScanAsync(localMusicDownloadDir())
 				return
 			}
 		}
@@ -564,6 +564,7 @@ func RegisterLocalMusicRoutes(api *gin.RouterGroup) {
 		localMusicScanCacheMu.Unlock()
 		localMusicMetaCacheMu.Lock()
 		localMusicMetaCache = make(map[string]*localMusicTrack)
+		localMusicMetaCacheRoot = ""
 		localMusicMetaCacheMu.Unlock()
 		c.JSON(http.StatusOK, gin.H{"status": "started"})
 	})
@@ -723,6 +724,10 @@ func scanLocalMusicTracks() ([]*localMusicTrack, string, bool, error) {
 	if err != nil {
 		return nil, dir, true, err
 	}
+	// Persisted index rows are also a metadata cache. Reuse their titles,
+	// durations and cover information instead of reading tags and launching
+	// ffprobe again for every file after an app restart.
+	hydrateLocalMusicMetaCacheFromIndex(rootAbs)
 
 	tracks := make([]*localMusicTrack, 0)
 	err = filepath.WalkDir(rootAbs, func(path string, entry fs.DirEntry, walkErr error) error {
@@ -769,7 +774,7 @@ func scanLocalMusicTracksCached(force bool) ([]*localMusicTrack, string, bool, e
 				return snapshot.Tracks, snapshot.Dir, snapshot.Exists, snapshot.Err, false, snapshot.ScannedAt
 			}
 			if snapshot.Err == nil {
-				refreshLocalMusicScanAsync(dir)
+				refreshLocalMusicScanAsyncIfStale(dir)
 				return snapshot.Tracks, snapshot.Dir, snapshot.Exists, snapshot.Err, true, snapshot.ScannedAt
 			}
 		}
@@ -787,11 +792,28 @@ func scanLocalMusicTracksCached(force bool) ([]*localMusicTrack, string, bool, e
 	return cloneLocalMusicTrackSlice(tracks), scanDir, exists, err, false, snapshot.ScannedAt
 }
 
-func refreshLocalMusicScanAsync(dir string) {
+func localMusicSnapshotScannedAt(dir string) time.Time {
+	snapshot, ok := cachedLocalMusicScanSnapshot(dir, false)
+	if !ok {
+		return time.Time{}
+	}
+	return snapshot.ScannedAt
+}
+
+func refreshLocalMusicScanAsyncIfStale(dir string) bool {
+	if snapshot, ok := cachedLocalMusicScanSnapshot(dir, false); ok &&
+		snapshot.Err == nil &&
+		time.Since(snapshot.ScannedAt) < localMusicScanCacheTTL {
+		return false
+	}
+	return refreshLocalMusicScanAsync(dir)
+}
+
+func refreshLocalMusicScanAsync(dir string) bool {
 	localMusicScanRefreshMu.Lock()
 	if localMusicScanRefreshInFlight {
 		localMusicScanRefreshMu.Unlock()
-		return
+		return false
 	}
 	localMusicScanRefreshInFlight = true
 	localMusicScanRefreshMu.Unlock()
@@ -822,6 +844,7 @@ func refreshLocalMusicScanAsync(dir string) {
 		}
 		storeLocalMusicScanSnapshot(nextSnapshot)
 	}()
+	return true
 }
 
 func sameLocalMusicScanContents(previous localMusicScanSnapshot, next localMusicScanSnapshot) bool {
@@ -875,6 +898,15 @@ func invalidateLocalMusicScanCache() {
 	localMusicScanCacheMu.Lock()
 	localMusicScanCache = localMusicScanSnapshot{}
 	localMusicScanCacheMu.Unlock()
+}
+
+// Offset is a position in the complete library, not a page-size limit.
+func parseLocalMusicOffset(raw string) int {
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || value < 0 {
+		return 0
+	}
+	return value
 }
 
 func parseLocalMusicRangeInt(raw string, fallback int) int {

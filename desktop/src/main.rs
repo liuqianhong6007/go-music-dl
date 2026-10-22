@@ -9,12 +9,26 @@ use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use tao::event_loop::{ControlFlow, EventLoop};
+use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tao::window::WindowBuilder;
 use wry::{WebContext, WebViewBuilder};
 
 #[cfg(target_os = "windows")]
+mod taskbar_windows;
+
+#[cfg(target_os = "macos")]
+mod native_macos;
+
+#[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
+
+#[derive(Debug)]
+enum DesktopEvent {
+    #[cfg(target_os = "windows")]
+    Taskbar(taskbar_windows::TaskbarAction),
+    #[cfg(target_os = "macos")]
+    PickDownloadFolder(u64),
+}
 
 mod window_config {
     pub const TITLE: &str = "music-dl-desktop-rust";
@@ -52,6 +66,28 @@ enum StartupContent {
     ErrorHtml(String),
 }
 
+struct BackendProcess {
+    child: Child,
+    stopped: bool,
+}
+
+impl BackendProcess {
+    fn stop(&mut self) {
+        if self.stopped {
+            return;
+        }
+        self.stopped = true;
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+impl Drop for BackendProcess {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
 fn main() -> wry::Result<()> {
     let app_data_dir = prepare_app_data_dir().expect("Failed to prepare app data directory");
 
@@ -59,6 +95,8 @@ fn main() -> wry::Result<()> {
     fs::create_dir_all(&webview_data_dir).expect("Failed to create webview data directory");
 
     let log_path = app_data_dir.join("logs").join("desktop-backend.log");
+    #[cfg(target_os = "windows")]
+    let taskbar_log_path = app_data_dir.join("logs").join("desktop-shell.log");
     let log_file = open_log_file(&log_path).ok();
 
     let temp_binary_path = extract_backend_binary();
@@ -101,7 +139,7 @@ fn main() -> wry::Result<()> {
         Err(_) => None,
     };
 
-    let event_loop = EventLoop::new();
+    let event_loop = EventLoopBuilder::<DesktopEvent>::with_user_event().build();
     let window = WindowBuilder::new()
         .with_title(window_config::TITLE)
         .with_inner_size(tao::dpi::LogicalSize::new(
@@ -141,33 +179,106 @@ fn main() -> wry::Result<()> {
         StartupContent::ServerUrl(url) => builder.with_url(&url),
         StartupContent::ErrorHtml(html) => builder.with_html(html),
     };
-    let _webview = builder.build()?;
+
+    #[cfg(target_os = "windows")]
+    let builder = builder
+        .with_initialization_script(taskbar_windows::INITIALIZATION_SCRIPT)
+        .with_ipc_handler(|request| {
+            taskbar_windows::handle_playback_state(request.body());
+        });
+
+    #[cfg(target_os = "macos")]
+    let builder = {
+        let proxy = event_loop.create_proxy();
+        builder
+            .with_initialization_script(native_macos::INITIALIZATION_SCRIPT)
+            .with_ipc_handler(move |request| {
+                let Some(id) = native_macos::parse_folder_pick_request(request.body()) else {
+                    return;
+                };
+                if proxy
+                    .send_event(DesktopEvent::PickDownloadFolder(id))
+                    .is_err()
+                {
+                    eprintln!("Failed to dispatch folder picker request {id}");
+                }
+            })
+    };
+
+    #[cfg(target_os = "windows")]
+    {
+        use tao::platform::windows::WindowExtWindows;
+
+        if let Err(error) =
+            taskbar_windows::install(window.hwnd(), event_loop.create_proxy(), &taskbar_log_path)
+        {
+            taskbar_windows::record_unavailable(&taskbar_log_path, &error);
+            eprintln!("Taskbar thumbnail toolbar is unavailable: {error}");
+        }
+    }
+
+    let webview = builder.build()?;
+
+    #[cfg(target_os = "macos")]
+    native_macos::install_native_menu();
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
 
-        if let tao::event::Event::WindowEvent {
-            event: tao::event::WindowEvent::CloseRequested,
-            ..
-        } = event
-        {
-            window.set_visible(false);
-
-            if let Some(child) = child.as_mut() {
-                let _ = child.kill();
-                let _ = child.wait();
-            }
-
-            for _ in 0..5 {
-                if fs::remove_file(&temp_binary_path).is_ok() || !temp_binary_path.exists() {
-                    break;
+        match event {
+            #[cfg(target_os = "windows")]
+            tao::event::Event::UserEvent(DesktopEvent::Taskbar(action)) => {
+                let script = taskbar_windows::control_script(action);
+                if let Err(error) = webview.evaluate_script(&script) {
+                    eprintln!(
+                        "Failed to run taskbar control {}: {}",
+                        action.as_str(),
+                        error
+                    );
                 }
-                thread::sleep(Duration::from_millis(50));
             }
+            #[cfg(target_os = "macos")]
+            tao::event::Event::UserEvent(DesktopEvent::PickDownloadFolder(id)) => {
+                let path = native_macos::pick_folder();
+                window.set_focus();
+                let script = native_macos::folder_pick_result_script(id, path.as_deref());
+                if let Err(error) = webview.evaluate_script(&script) {
+                    eprintln!("Failed to return folder picker result {id}: {error}");
+                }
+            }
+            tao::event::Event::WindowEvent {
+                event: tao::event::WindowEvent::CloseRequested,
+                ..
+            } => {
+                #[cfg(target_os = "windows")]
+                taskbar_windows::shutdown();
 
-            *control_flow = ControlFlow::Exit;
+                window.set_visible(false);
+                cleanup_runtime(&mut child, &temp_binary_path);
+                *control_flow = ControlFlow::Exit;
+            }
+            tao::event::Event::LoopDestroyed => {
+                #[cfg(target_os = "windows")]
+                taskbar_windows::shutdown();
+
+                cleanup_runtime(&mut child, &temp_binary_path);
+            }
+            _ => {}
         }
     });
+}
+
+fn cleanup_runtime(child: &mut Option<BackendProcess>, temp_binary_path: &Path) {
+    if let Some(child) = child.as_mut() {
+        child.stop();
+    }
+
+    for _ in 0..5 {
+        if fs::remove_file(temp_binary_path).is_ok() || !temp_binary_path.exists() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
 }
 
 fn extract_backend_binary() -> PathBuf {
@@ -200,7 +311,7 @@ fn start_backend(
     backend_path: &Path,
     app_data_dir: &Path,
     log_file: Option<&std::fs::File>,
-) -> Option<Child> {
+) -> Option<BackendProcess> {
     let mut cmd = Command::new(backend_path);
     cmd.arg("web")
         .arg("--desktop")
@@ -227,7 +338,10 @@ fn start_backend(
     }
 
     match cmd.spawn() {
-        Ok(child) => Some(child),
+        Ok(child) => Some(BackendProcess {
+            child,
+            stopped: false,
+        }),
         Err(err) => {
             eprintln!("Failed to start backend: {}", err);
             None
@@ -235,7 +349,7 @@ fn start_backend(
     }
 }
 
-fn wait_for_server(child: &mut Child) -> Result<(), String> {
+fn wait_for_server(child: &mut BackendProcess) -> Result<(), String> {
     let timeout = Duration::from_millis(server_config::STARTUP_TIMEOUT_MS);
     let deadline = Instant::now() + timeout;
 
@@ -244,7 +358,7 @@ fn wait_for_server(child: &mut Child) -> Result<(), String> {
             return Ok(());
         }
 
-        match child.try_wait() {
+        match child.child.try_wait() {
             Ok(Some(status)) => {
                 return Err(format!(
                     "The backend exited before the UI became ready: {}",

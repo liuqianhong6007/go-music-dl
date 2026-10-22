@@ -9,13 +9,23 @@ Dockerfile
 # Build artifacts
 music-dl
 music-dl.exe
+*.apk
+*.exe
+*.idsig
+gogio-local.exe
+tmp-music-dl*
 
 # Downloads
 downloads/
+data/
 desktop/
+desktop_app/ffmpeg/
+screenshots/
 
 # Sensitive files
 cookies.json
+.env
+*.keystore
 
 # Documentation
 README.md
@@ -33,5 +43,6 @@ Thumbs.db
 *.log
 
 # Temporary files
+tmp/
 *.tmp
 *.swp

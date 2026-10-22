@@ -44,3 +44,23 @@ func TestPlaybackRateControlsUseSharedState(t *testing.T) {
 		t.Fatal("videogen.js still uses the old limited playback rate list")
 	}
 }
+
+func TestTaskbarPlaybackControlSupportsNativeAndroidActions(t *testing.T) {
+	appContent, err := templateFS.ReadFile("templates/static/js/app.js")
+	if err != nil {
+		t.Fatalf("ReadFile(app.js): %v", err)
+	}
+	appJS := string(appContent)
+	for _, want := range []string{
+		`window.musicDlTaskbarControl = function (action, value)`,
+		`case "play":`,
+		`case "pause":`,
+		`case "stop":`,
+		`case "seek":`,
+		`const positionSeconds = (Number(value) || 0) / 1000;`,
+	} {
+		if !strings.Contains(appJS, want) {
+			t.Fatalf("app.js missing native playback control token %q", want)
+		}
+	}
+}

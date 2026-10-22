@@ -591,7 +591,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: music-dl-ios-unsigned-signing-package
-          path: music-dl-ios-unsigned.ipa
+          path: |
+            music-dl-ios-unsigned.ipa
+            music-dl-ios-unsigned.ipa.sha256
 
       - name: Upload unsigned iOS signing package to Release
         uses: Wandalen/wretry.action@v3.8.0
@@ -600,7 +602,9 @@ jobs:
           attempt_delay: 10000
           action: softprops/action-gh-release@v2
           with: |
-            files: music-dl-ios-unsigned.ipa
+            files: |
+              music-dl-ios-unsigned.ipa
+              music-dl-ios-unsigned.ipa.sha256
 
       - name: Check iOS signing inputs
         id: ios_signing
@@ -652,7 +656,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: music-dl-ios-app
-          path: music-dl-ios.ipa
+          path: |
+            music-dl-ios.ipa
+            music-dl-ios.ipa.sha256
 
       - name: Upload iOS App to Release
         if: steps.ios_signing.outputs.enabled == 'true'
@@ -662,7 +668,9 @@ jobs:
           attempt_delay: 10000
           action: softprops/action-gh-release@v2
           with: |
-            files: music-dl-ios.ipa
+            files: |
+              music-dl-ios.ipa
+              music-dl-ios.ipa.sha256
 
   # 6. Windows desktop build
   build-windows-desktop:

@@ -158,6 +158,20 @@ func TestLegacyDedupEntryWithoutRelPathStaysDownloaded(t *testing.T) {
 	}
 }
 
+func TestDownloadLookupFindsLegacyTraditionalChineseKey(t *testing.T) {
+	index := DownloadDedupIndex{
+		"久石讓 - Summer 久石讓": "久石讓 - Summer 久石讓.flac",
+	}
+	song := &model.Song{Name: "Summer 久石让", Artist: "久石让"}
+
+	if !IsSongDownloaded(song, index) {
+		t.Fatal("simplified song should match a legacy traditional Chinese key")
+	}
+	if got := SongFileRelPath(song, index); got != "久石讓 - Summer 久石讓.flac" {
+		t.Fatalf("SongFileRelPath = %q", got)
+	}
+}
+
 func TestForgetDownloadedSongClearsDedupEntry(t *testing.T) {
 	newDownloadDedupTestDB(t)
 	song := &model.Song{Name: "Song", Artist: "Artist"}

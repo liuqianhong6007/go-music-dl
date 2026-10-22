@@ -1,5 +1,13 @@
 # Go Music DL Desktop
 
+## Windows taskbar thumbnail toolbar
+
+The Windows build provides previous, play/pause, and next controls on the taskbar thumbnail toolbar. The buttons stay available while the window is minimized, follow the current playback state, and are disabled when the playlist has no tracks.
+
+## macOS native desktop integration
+
+The macOS build installs a native application menu with a working Command-Q shortcut and standard undo, redo, cut, copy, paste, and select-all commands. The download-folder button also opens the native `NSOpenPanel` directory picker and returns the selected absolute path to the web UI through `window.musicDlPickDownloadFolder()`.
+
 桌面客户端版本的 [Go Music DL](https://github.com/guohuiyuan/go-music-dl)，提供原生桌面窗口体验，无需打开浏览器即可使用完整的 Web 界面功能。
 
 ## ✨ 特性

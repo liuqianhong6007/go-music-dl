@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -131,6 +132,15 @@ func TestWebSettingsDefaultAndPersist(t *testing.T) {
 	if defaults.AutoCacheOnPlay {
 		t.Fatalf("default AutoCacheOnPlay should be false")
 	}
+	if defaults.FilterVersionKeywords || defaults.FilterShortTracks {
+		t.Fatalf("default search filters should be disabled: %#v", defaults)
+	}
+	if defaults.VersionFilterKeywords != "Live, Remix, Demo" {
+		t.Fatalf("default VersionFilterKeywords mismatch: %q", defaults.VersionFilterKeywords)
+	}
+	if !defaults.NormalizeChineseVariants {
+		t.Fatal("default NormalizeChineseVariants should be true")
+	}
 	if defaults.UpdateRepoURL != DefaultUpdateRepoURL {
 		t.Fatalf("default UpdateRepoURL mismatch: got %q want %q", defaults.UpdateRepoURL, DefaultUpdateRepoURL)
 	}
@@ -152,6 +162,21 @@ func TestWebSettingsDefaultAndPersist(t *testing.T) {
 	if defaults.VgExportVideo {
 		t.Fatalf("default VgExportVideo should be false")
 	}
+	if defaults.SodaSignerURL != "" || defaults.SodaSignerToken != "" {
+		t.Fatalf("default soda signer should be empty (fallback to local signer): got %q / %q", defaults.SodaSignerURL, defaults.SodaSignerToken)
+	}
+	if defaults.ShortcutPlayPause != DefaultShortcutPlayPause {
+		t.Fatalf("default ShortcutPlayPause mismatch: got %q want %q", defaults.ShortcutPlayPause, DefaultShortcutPlayPause)
+	}
+	if defaults.ShortcutPrevious != "" || defaults.ShortcutNext != "" || defaults.ShortcutSeekBack != "" || defaults.ShortcutSeekForward != "" {
+		t.Fatalf("default optional playback shortcuts should be empty: %#v", defaults)
+	}
+	if defaults.LyricFontFamily != DefaultLyricFontFamily {
+		t.Fatalf("default LyricFontFamily mismatch: got %q want %q", defaults.LyricFontFamily, DefaultLyricFontFamily)
+	}
+	if defaults.LyricFontSize != DefaultLyricFontSize {
+		t.Fatalf("default LyricFontSize mismatch: got %d want %d", defaults.LyricFontSize, DefaultLyricFontSize)
+	}
 
 	if err := SaveWebSettings(WebSettings{
 		EmbedDownload:            true,
@@ -171,6 +196,10 @@ func TestWebSettingsDefaultAndPersist(t *testing.T) {
 		AutoCheckUpdate:          false,
 		AutoSwitchInvalidSources: false,
 		AutoCacheOnPlay:          true,
+		FilterVersionKeywords:    true,
+		VersionFilterKeywords:    "Live; Demo",
+		FilterShortTracks:        true,
+		NormalizeChineseVariants: true,
 		UpdateRepoURL:            "https://github.com/example/fork",
 		GithubProxyEnabled:       true,
 		GithubProxyURL:           "https://gh-proxy.com/",
@@ -178,6 +207,13 @@ func TestWebSettingsDefaultAndPersist(t *testing.T) {
 		VgChangeAudio:            true,
 		VgChangeLyric:            true,
 		VgExportVideo:            true,
+		ShortcutPlayPause:        DefaultShortcutPlayPause,
+		ShortcutPrevious:         "Ctrl+ArrowLeft",
+		ShortcutNext:             "Ctrl+ArrowRight",
+		ShortcutSeekBack:         "Ctrl+Shift+ArrowLeft",
+		ShortcutSeekForward:      "Ctrl+Shift+ArrowRight",
+		LyricFontFamily:          "pingfang",
+		LyricFontSize:            28,
 	}); err != nil {
 		t.Fatalf("save web settings: %v", err)
 	}
@@ -201,6 +237,10 @@ func TestWebSettingsDefaultAndPersist(t *testing.T) {
 		AutoCheckUpdate:          false,
 		AutoSwitchInvalidSources: false,
 		AutoCacheOnPlay:          true,
+		FilterVersionKeywords:    true,
+		VersionFilterKeywords:    "Live; Demo",
+		FilterShortTracks:        true,
+		NormalizeChineseVariants: true,
 		UpdateRepoURL:            "https://github.com/example/fork",
 		GithubProxyEnabled:       true,
 		GithubProxyURL:           "https://gh-proxy.com/",
@@ -208,6 +248,15 @@ func TestWebSettingsDefaultAndPersist(t *testing.T) {
 		VgChangeAudio:            true,
 		VgChangeLyric:            true,
 		VgExportVideo:            true,
+		ShortcutPlayPause:        DefaultShortcutPlayPause,
+		ShortcutPrevious:         "Ctrl+ArrowLeft",
+		ShortcutNext:             "Ctrl+ArrowRight",
+		ShortcutSeekBack:         "Ctrl+Shift+ArrowLeft",
+		ShortcutSeekForward:      "Ctrl+Shift+ArrowRight",
+		LyricFontFamily:          "pingfang",
+		LyricFontSize:            28,
+		// 未配置远程签名器时保持为空 = 使用本机签名器；空 Token 保存时保留已保存的值。
+		SodaSignerToken: "",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("saved settings mismatch\ngot:  %#v\nwant: %#v", got, want)
@@ -263,6 +312,18 @@ func TestWebSettingsDefaultAndPersist(t *testing.T) {
 	if got.VgChangeCover || got.VgChangeAudio || got.VgChangeLyric || got.VgExportVideo {
 		t.Fatalf("custom save should fallback video generator settings to default false: %#v", got)
 	}
+	if got.SodaSignerURL != "" {
+		t.Fatalf("custom save should keep SodaSignerURL empty when omitted: got %q", got.SodaSignerURL)
+	}
+	if got.SodaSignerToken != "" {
+		t.Fatalf("custom save should keep SodaSignerToken empty when omitted: got %q", got.SodaSignerToken)
+	}
+	if got.ShortcutPlayPause != "" || got.ShortcutPrevious != "" || got.ShortcutNext != "" || got.ShortcutSeekBack != "" || got.ShortcutSeekForward != "" {
+		t.Fatalf("custom save should clear omitted shortcuts: %#v", got)
+	}
+	if got.LyricFontFamily != DefaultLyricFontFamily || got.LyricFontSize != DefaultLyricFontSize {
+		t.Fatalf("custom save should restore default lyric appearance: %#v", got)
+	}
 
 	absoluteDir := filepath.Join(baseDir, "downloads", "absolute")
 	if err := SaveWebSettings(WebSettings{
@@ -306,6 +367,63 @@ func TestWebSettingsLegacyPayloadUsesCurrentSwitchDefaults(t *testing.T) {
 	if got.AutoCacheOnPlay {
 		t.Fatalf("legacy settings should default AutoCacheOnPlay to false: %#v", got)
 	}
+	if got.ShortcutPlayPause != DefaultShortcutPlayPause || got.LyricFontFamily != DefaultLyricFontFamily || got.LyricFontSize != DefaultLyricFontSize {
+		t.Fatalf("legacy settings should receive playback setting defaults: %#v", got)
+	}
+}
+
+func TestWebSettingsPlaybackShortcutsAndLyricAppearance(t *testing.T) {
+	baseDir := t.TempDir()
+	t.Setenv("MUSIC_DL_CONFIG_DB", filepath.Join(baseDir, "data", "settings.db"))
+	t.Setenv("MUSIC_DL_COOKIE_FILE", filepath.Join(baseDir, "data", "cookies.json"))
+	resetConfigStateForTest()
+	t.Cleanup(resetConfigStateForTest)
+
+	settings := WebSettings{
+		ShortcutPlayPause:   " control + spacebar ",
+		ShortcutPrevious:    "command+KeyK",
+		ShortcutNext:        "pgdn",
+		ShortcutSeekBack:    "Shift+ArrowLeft",
+		ShortcutSeekForward: "ArrowRight",
+		LyricFontFamily:     "SOURCE-HAN",
+		LyricFontSize:       100,
+	}
+	normalized := normalizeWebSettings(settings)
+	if normalized.ShortcutPlayPause != "Ctrl+Space" {
+		t.Fatalf("normalized play/pause shortcut = %q, want Ctrl+Space", normalized.ShortcutPlayPause)
+	}
+	if normalized.ShortcutPrevious != "Meta+K" {
+		t.Fatalf("normalized previous shortcut = %q, want Meta+K", normalized.ShortcutPrevious)
+	}
+	if normalized.ShortcutNext != "PageDown" {
+		t.Fatalf("normalized next shortcut = %q, want PageDown", normalized.ShortcutNext)
+	}
+	if normalized.LyricFontFamily != "source-han" || normalized.LyricFontSize != 48 {
+		t.Fatalf("normalized lyric appearance = %q/%d, want source-han/48", normalized.LyricFontFamily, normalized.LyricFontSize)
+	}
+
+	if err := SaveWebSettings(settings); !errors.Is(err, ErrInvalidWebSettings) {
+		t.Fatalf("reserved page shortcut should be rejected, got %v", err)
+	}
+
+	settings.ShortcutNext = "Ctrl+Space"
+	if err := SaveWebSettings(settings); !errors.Is(err, ErrInvalidWebSettings) {
+		t.Fatalf("duplicate shortcut should be rejected, got %v", err)
+	}
+
+	settings.ShortcutNext = "F9"
+	settings.LyricFontFamily = "unknown-font"
+	settings.LyricFontSize = 1
+	if err := SaveWebSettings(settings); err != nil {
+		t.Fatalf("save valid playback settings: %v", err)
+	}
+	got := GetWebSettings()
+	if got.ShortcutPlayPause != "Ctrl+Space" || got.ShortcutPrevious != "Meta+K" || got.ShortcutNext != "F9" {
+		t.Fatalf("saved shortcuts mismatch: %#v", got)
+	}
+	if got.LyricFontFamily != DefaultLyricFontFamily || got.LyricFontSize != 14 {
+		t.Fatalf("saved lyric appearance mismatch: got %q/%d", got.LyricFontFamily, got.LyricFontSize)
+	}
 }
 
 func TestWebSettingsPreservesWebDAVPasswordWhenOmitted(t *testing.T) {
@@ -335,6 +453,72 @@ func TestWebSettingsPreservesWebDAVPasswordWhenOmitted(t *testing.T) {
 	got := GetWebSettings()
 	if got.WebDAVPassword != "secret" {
 		t.Fatalf("WebDAVPassword should be preserved when omitted: got %q", got.WebDAVPassword)
+	}
+}
+
+func TestWebSettingsSodaSignerDefaultsAndPreserve(t *testing.T) {
+	baseDir := t.TempDir()
+	t.Setenv("MUSIC_DL_CONFIG_DB", filepath.Join(baseDir, "data", "settings.db"))
+	t.Setenv("MUSIC_DL_COOKIE_FILE", filepath.Join(baseDir, "data", "cookies.json"))
+	t.Setenv("QISHUI_SIGNER_URL", "")
+	t.Setenv("QISHUI_SIGNER_TOKEN", "")
+	resetConfigStateForTest()
+	t.Cleanup(resetConfigStateForTest)
+
+	defaults := GetWebSettings()
+	if defaults.SodaSignerURL != "" || defaults.SodaSignerToken != "" {
+		t.Fatalf("default soda signer should be empty: got %q / %q", defaults.SodaSignerURL, defaults.SodaSignerToken)
+	}
+	url, token := SodaSignerConfig()
+	if url != "" || token != "" {
+		t.Fatalf("SodaSignerConfig default should be empty: got %q / %q", url, token)
+	}
+
+	if err := SaveWebSettings(WebSettings{
+		SodaSignerURL:   "http://127.0.0.1:8899/sign",
+		SodaSignerToken: "self-hosted-token",
+	}); err != nil {
+		t.Fatalf("save custom soda signer: %v", err)
+	}
+	got := GetWebSettings()
+	if got.SodaSignerURL != "http://127.0.0.1:8899/sign" || got.SodaSignerToken != "self-hosted-token" {
+		t.Fatalf("custom soda signer mismatch: got %q / %q", got.SodaSignerURL, got.SodaSignerToken)
+	}
+
+	// 只改地址、不带 Token（界面不回显 Token）时应保留已保存的 Token。
+	if err := SaveWebSettings(WebSettings{
+		SodaSignerURL: "http://127.0.0.1:9999/sign",
+	}); err != nil {
+		t.Fatalf("save soda signer without token: %v", err)
+	}
+	got = GetWebSettings()
+	if got.SodaSignerURL != "http://127.0.0.1:9999/sign" {
+		t.Fatalf("soda signer url should update: got %q", got.SodaSignerURL)
+	}
+	if got.SodaSignerToken != "self-hosted-token" {
+		t.Fatalf("SodaSignerToken should be preserved when omitted: got %q", got.SodaSignerToken)
+	}
+
+	// 清空地址表示回到本机签名器（没有本机客户端时才会退化为试听）。
+	if err := SaveWebSettings(WebSettings{
+		SodaSignerURL: "",
+	}); err != nil {
+		t.Fatalf("save empty soda signer url: %v", err)
+	}
+	got = GetWebSettings()
+	if got.SodaSignerURL != "" {
+		t.Fatalf("empty SodaSignerURL should fallback to local signer: got %q", got.SodaSignerURL)
+	}
+	if got.SodaSignerToken != "self-hosted-token" {
+		t.Fatalf("SodaSignerToken should survive empty url save: got %q", got.SodaSignerToken)
+	}
+
+	// 环境变量优先于界面设置。
+	t.Setenv("QISHUI_SIGNER_URL", "http://127.0.0.1:7777/sign")
+	t.Setenv("QISHUI_SIGNER_TOKEN", "env-token")
+	url, token = SodaSignerConfig()
+	if url != "http://127.0.0.1:7777/sign" || token != "env-token" {
+		t.Fatalf("env soda signer should win: got %q / %q", url, token)
 	}
 }
 

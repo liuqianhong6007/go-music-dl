@@ -33,32 +33,40 @@ type desktopApp struct {
 
 	// 这些状态用于在多个 frame 之间协调 WebView 初始化流程，
 	// 因为 Gio 插件命令是在 frame 处理中下发的。
-	bridgeInstalled       bool
-	callbackRegistered    bool
-	storagePermissionOnce bool
-	bundledFFmpegOnce     bool
-	pendingInitialNav     bool
-	pendingHistoryBack    bool
-	pendingExternalOpenTo *url.URL
-	initialNav            <-chan initialNavigationResult
-	initialNavURL         string
-	initialNavReady       bool
-	initialNavSentAt      time.Time
-	initialNavAcked       bool
-	currentWebURL         string
-	reloadPending         bool
-	reloadDeferred        bool
-	playbackActive        bool
-	lastFrameAt           time.Time
+	bridgeInstalled         bool
+	callbackRegistered      bool
+	storagePermissionOnce   bool
+	androidWebViewFocusOnce bool
+	bundledFFmpegOnce       bool
+	pendingInitialNav       bool
+	pendingHistoryBack      bool
+	pendingExternalOpenTo   *url.URL
+	initialNav              <-chan initialNavigationResult
+	initialNavURL           string
+	initialNavReady         bool
+	initialNavSentAt        time.Time
+	initialNavAcked         bool
+	navigationAttempts      int
+	navigationFailed        bool
+	lastWebViewState        string
+	currentWebURL           string
+	reloadPending           bool
+	reloadDeferred          bool
+	playbackActive          bool
+	playbackMetadata        playbackMetadata
+	lastFrameAt             time.Time
+	pendingTVNavigation     []string
 }
 
 const (
-	downloadCallback        = "musicDlOpenDownload"
-	playbackCallback        = "musicDlPlaybackState"
-	appStateCallback        = "musicDlAppState"
-	preferredBrowserPK      = ""
-	initialNavRetryInterval = 3 * time.Second
-	resumeReloadThreshold   = 2 * time.Second
+	downloadCallback         = "musicDlOpenDownload"
+	playbackCallback         = "musicDlPlaybackState"
+	playbackMetadataCallback = "musicDlPlaybackMetadata"
+	appStateCallback         = "musicDlAppState"
+	preferredBrowserPK       = ""
+	initialNavRetryInterval  = 3 * time.Second
+	initialNavMaxAttempts    = 5
+	resumeReloadThreshold    = 2 * time.Second
 )
 
 // resumeReloadEnabled 只在 iOS 上启用"长帧间隔 = 从后台恢复"的重载恢复逻辑。
@@ -86,6 +94,10 @@ const bridgeScript = `(function () {
       return;
     }
     if (event.key === "BrowserBack") {
+      if (typeof window.__musicDlHandleBack === "function" && window.__musicDlHandleBack()) {
+        event.preventDefault();
+        return;
+      }
       event.preventDefault();
       window.history.back();
       return;
@@ -99,6 +111,73 @@ const bridgeScript = `(function () {
   function notifyPlaybackState(state) {
     if (globalThis.callback && typeof globalThis.callback.musicDlPlaybackState === "function") {
       globalThis.callback.musicDlPlaybackState("playback:" + state);
+    }
+    notifyPlaybackMetadata(true);
+  }
+
+  var lastPlaybackMetadata = "";
+  var lastNativePlaybackAt = 0;
+  function currentPlaybackMetadataPayload() {
+    var player = window.ap;
+    if (!player || !player.audio || !player.list || !Array.isArray(player.list.audios)) {
+      return null;
+    }
+    var index = player.list.index;
+    var audio = typeof index === "number" ? player.list.audios[index] : null;
+    if (!audio) {
+      return null;
+    }
+    var duration = Number(player.audio.duration);
+    var position = Number(player.audio.currentTime);
+    return {
+      title: String(audio.name || ""),
+      artist: String(audio.artist || ""),
+      album: String(audio.album || ""),
+      positionMs: Number.isFinite(position) ? Math.max(0, Math.round(position * 1000)) : 0,
+      durationMs: Number.isFinite(duration) ? Math.max(0, Math.round(duration * 1000)) : 0,
+      playing: !player.audio.paused && !player.audio.ended
+    };
+  }
+
+  function notifyNativePlayback(force) {
+    var bridge = window.MusicDLNativePlayback;
+    if (!bridge || typeof bridge.updatePlayback !== "function") {
+      return;
+    }
+    var now = Date.now();
+    if (!force && now - lastNativePlaybackAt < 750) {
+      return;
+    }
+    var payload = currentPlaybackMetadataPayload();
+    if (!payload) {
+      return;
+    }
+    lastNativePlaybackAt = now;
+    try {
+      bridge.updatePlayback(
+        payload.title,
+        payload.artist,
+        payload.album,
+        payload.positionMs,
+        payload.durationMs,
+        payload.playing
+      );
+    } catch (e) {}
+  }
+
+  function notifyPlaybackMetadata(force) {
+    var payload = currentPlaybackMetadataPayload();
+    if (!payload) {
+      return;
+    }
+    var encoded = JSON.stringify(payload);
+    if (!force && encoded === lastPlaybackMetadata) {
+      return;
+    }
+    lastPlaybackMetadata = encoded;
+    notifyNativePlayback(force);
+    if (globalThis.callback && typeof globalThis.callback.musicDlPlaybackMetadata === "function") {
+      globalThis.callback.musicDlPlaybackMetadata("playback_metadata:" + encoded);
     }
   }
 
@@ -118,7 +197,10 @@ const bridgeScript = `(function () {
   // 创建的，安装命令可能晚到甚至丢失）。只挂监听器就永远等不到事件，Go 侧
   // 收不到加载确认，会每隔几秒重试导航，把用户刚搜出的结果冲掉。
   // 文档已就绪时直接补发一次确认。
+  // The bridge can be injected after DOMContentLoaded. Acknowledge as soon as
+  // it runs so the native shell does not reload a page that is merely slow.
   console.log("[musicdl-bridge] run readyState=" + document.readyState + " callback=" + (typeof globalThis.callback));
+  notifyAppState("bridge");
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", function () {
       console.log("[musicdl-bridge] ack via DOMContentLoaded");
@@ -161,10 +243,6 @@ const bridgeScript = `(function () {
     }
   }, true);
 
-  window.addEventListener("pagehide", function () {
-    notifyPlaybackState("released");
-  });
-
   function bindAPlayerPlayback() {
     var player = window.ap;
     if (!player || !player.audio || player.audio.__musicDlPlaybackBound) {
@@ -183,6 +261,9 @@ const bridgeScript = `(function () {
     audio.addEventListener("pause", function () {
       notifyCurrentPlaybackState("paused");
     });
+    audio.addEventListener("timeupdate", function () {
+      notifyNativePlayback(false);
+    });
     audio.addEventListener("ended", function () {
       notifyCurrentPlaybackState("ended");
     });
@@ -196,6 +277,7 @@ const bridgeScript = `(function () {
   }
   bindAPlayerWhenReady();
   setInterval(bindAPlayerPlayback, 500);
+  setInterval(notifyPlaybackMetadata, 1000);
 
   document.addEventListener("click", function (event) {
     if (event.defaultPrevented) {
@@ -235,7 +317,14 @@ const bridgeScript = `(function () {
   }, true);
 })();`
 
-const historyBackScript = `if (window.history.length > 1) { window.history.back(); }`
+const historyBackScript = `(function () {
+  if (typeof window.__musicDlHandleBack === "function" && window.__musicDlHandleBack()) {
+    return;
+  }
+  if (window.history.length > 1) {
+    window.history.back();
+  }
+})();`
 
 func main() {
 	path, err := app.DataDir()
@@ -269,11 +358,12 @@ func (a *desktopApp) run() error {
 	for {
 		switch evt := gioplugins.Hijack(a.window).(type) {
 		case app.DestroyEvent:
-			a.setPlaybackWakeLock(false)
+			a.stopPlaybackPlatform()
 			return evt.Err
 		case app.ViewEvent:
 			a.configureBundledFFmpeg(evt)
 			a.requestStoragePermission(evt)
+			a.requestAndroidWebViewFocus(evt)
 		case app.FrameEvent:
 			a.handleFrame(evt)
 		}
@@ -297,16 +387,27 @@ func (a *desktopApp) handleFrame(evt app.FrameEvent) {
 	a.lastFrameAt = now
 
 	a.pendingHistoryBack = a.pendingHistoryBack || consumeBackShortcuts(gtx)
+	a.pendingTVNavigation = append(a.pendingTVNavigation, consumeTVNavigationShortcuts(gtx)...)
+	if len(a.pendingTVNavigation) > 12 {
+		a.pendingTVNavigation = a.pendingTVNavigation[len(a.pendingTVNavigation)-12:]
+	}
 	a.consumeWebViewEvents(gtx)
 	a.consumeInitialNavigationResult()
 	a.layoutWebView(gtx)
 	evt.Frame(gtx.Ops)
+	if a.playbackActive {
+		// Android can stop producing Gio frames while the app is in the
+		// background. Keep a low-frequency frame alive so WebView playback
+		// events still reach the foreground service and MediaSession.
+		gtx.Execute(op.InvalidateCmd{At: now.Add(time.Second)})
+	}
 
 	a.ensureBridge(gtx)
 	a.handlePendingNavigation(gtx)
 	a.handlePendingReload(gtx)
 	a.handleInitialNavigationRecovery(gtx)
 	a.handlePendingHistoryBack(gtx)
+	a.handlePendingTVNavigation(gtx)
 	a.handlePendingExternalOpen(gtx)
 }
 
@@ -342,6 +443,11 @@ func (a *desktopApp) registerCallbacks(gtx layout.Context) {
 	gioplugins.Execute(gtx, giowebview.MessageReceiverCmd{
 		View: &a.tag,
 		Tag:  &a.tag,
+		Name: playbackMetadataCallback,
+	})
+	gioplugins.Execute(gtx, giowebview.MessageReceiverCmd{
+		View: &a.tag,
+		Tag:  &a.tag,
 		Name: appStateCallback,
 	})
 }
@@ -368,7 +474,7 @@ func (a *desktopApp) handlePendingNavigation(gtx layout.Context) {
 	}
 
 	// 首次跳转延后到桥接回调准备完成之后，避免页面过早加载。
-	a.navigateTo(gtx, a.navigationTarget())
+	a.startNavigation(gtx, a.navigationTarget())
 	a.pendingInitialNav = false
 }
 
@@ -378,27 +484,72 @@ func (a *desktopApp) handlePendingReload(gtx layout.Context) {
 	}
 
 	log.Printf("pending reload navigating to %s", a.navigationTarget())
-	a.navigateTo(gtx, a.navigationTarget())
+	a.startNavigation(gtx, a.navigationTarget())
 }
 
 func (a *desktopApp) handleInitialNavigationRecovery(gtx layout.Context) {
-	if !a.initialNavReady || !a.callbackRegistered || a.pendingInitialNav || a.initialNavAcked {
+	switch a.navigationRecoveryAction(time.Now()) {
+	case navigationRecoveryWait:
 		return
-	}
-	if a.initialNavSentAt.IsZero() || time.Since(a.initialNavSentAt) < initialNavRetryInterval {
+	case navigationRecoveryShowDiagnostic:
+		a.navigationFailed = true
+		log.Printf(
+			"webview did not acknowledge after %d attempts; showing in-app diagnostics (last state=%q url=%s)",
+			a.navigationAttempts,
+			a.lastWebViewState,
+			a.navigationTarget(),
+		)
+		a.navigateTo(gtx, navigationDiagnosticDataURL(
+			a.navigationTarget(),
+			a.navigationAttempts,
+			a.lastWebViewState,
+			runtime.GOOS,
+			runtime.GOARCH,
+			runtime.Version(),
+		))
 		return
 	}
 
 	// NavigateCmd can be dropped before the native WebView exists, so keep
-	// retrying until the page explicitly confirms that it loaded.
+	// retrying for a bounded number of attempts until the bridge runs.
 	// InstallJavascriptCmd and MessageReceiverCmd can be dropped the same way:
 	// without the bridge script the page cannot acknowledge, and without the
 	// callback registration the acknowledgement is silently discarded by the
 	// plugin, so re-issue both alongside the navigation.
-	log.Printf("webview load not acknowledged yet, retrying bridge + navigation")
+	log.Printf("webview load not acknowledged yet, retrying bridge + navigation (%d/%d)", a.navigationAttempts+1, initialNavMaxAttempts)
 	a.installBridge(gtx)
 	a.registerCallbacks(gtx)
-	a.navigateTo(gtx, a.navigationTarget())
+	a.startNavigation(gtx, a.navigationTarget())
+}
+
+type navigationRecoveryResult uint8
+
+const (
+	navigationRecoveryWait navigationRecoveryResult = iota
+	navigationRecoveryRetry
+	navigationRecoveryShowDiagnostic
+)
+
+func (a *desktopApp) navigationRecoveryAction(now time.Time) navigationRecoveryResult {
+	if !a.initialNavReady || !a.callbackRegistered || a.pendingInitialNav || a.initialNavAcked || a.navigationFailed {
+		return navigationRecoveryWait
+	}
+	if a.initialNavSentAt.IsZero() || now.Sub(a.initialNavSentAt) < initialNavRetryInterval {
+		return navigationRecoveryWait
+	}
+	if a.navigationAttempts >= initialNavMaxAttempts {
+		return navigationRecoveryShowDiagnostic
+	}
+	return navigationRecoveryRetry
+}
+
+func (a *desktopApp) startNavigation(gtx layout.Context, rawURL string) {
+	if rawURL == "" {
+		return
+	}
+	a.navigationAttempts++
+	a.navigationFailed = false
+	a.navigateTo(gtx, rawURL)
 }
 
 func (a *desktopApp) navigateTo(gtx layout.Context, rawURL string) {
@@ -464,6 +615,52 @@ func (a *desktopApp) handlePendingHistoryBack(gtx layout.Context) {
 	a.pendingHistoryBack = false
 }
 
+var tvNavigationScripts = map[string]string{
+	"up": `(function () {
+  if (typeof window.__musicDlTVHandleKey === "function") {
+    window.__musicDlTVHandleKey("up");
+  }
+})();`,
+	"down": `(function () {
+  if (typeof window.__musicDlTVHandleKey === "function") {
+    window.__musicDlTVHandleKey("down");
+  }
+})();`,
+	"left": `(function () {
+  if (typeof window.__musicDlTVHandleKey === "function") {
+    window.__musicDlTVHandleKey("left");
+  }
+})();`,
+	"right": `(function () {
+  if (typeof window.__musicDlTVHandleKey === "function") {
+    window.__musicDlTVHandleKey("right");
+  }
+})();`,
+	"enter": `(function () {
+  if (typeof window.__musicDlTVHandleKey === "function") {
+    window.__musicDlTVHandleKey("enter");
+  }
+})();`,
+}
+
+func (a *desktopApp) handlePendingTVNavigation(gtx layout.Context) {
+	if len(a.pendingTVNavigation) == 0 || !a.bridgeInstalled || a.pendingInitialNav {
+		return
+	}
+
+	for _, action := range a.pendingTVNavigation {
+		script := tvNavigationScripts[action]
+		if script == "" {
+			continue
+		}
+		gioplugins.Execute(gtx, giowebview.ExecuteJavascriptCmd{
+			View:   &a.tag,
+			Script: script,
+		})
+	}
+	a.pendingTVNavigation = a.pendingTVNavigation[:0]
+}
+
 func (a *desktopApp) handlePendingExternalOpen(gtx layout.Context) {
 	if a.pendingExternalOpenTo == nil {
 		return
@@ -497,6 +694,10 @@ func (a *desktopApp) consumeWebViewEvents(gtx layout.Context) {
 }
 
 func (a *desktopApp) handleWebViewMessage(raw string) {
+	if strings.HasPrefix(raw, "playback_metadata:") {
+		a.handlePlaybackMetadata(strings.TrimPrefix(raw, "playback_metadata:"))
+		return
+	}
 	if strings.HasPrefix(raw, "playback:") {
 		a.handlePlaybackState(strings.TrimPrefix(raw, "playback:"))
 		return
@@ -529,6 +730,16 @@ func (a *desktopApp) handleNavigationEvent(rawURL string) {
 		// the only load acknowledgement available for the startup error page.
 		a.initialNavAcked = true
 		a.reloadPending = false
+		a.navigationAttempts = 0
+		return
+	}
+	if a.navigationFailed {
+		// The retry link in the diagnostic page starts a fresh recovery cycle.
+		log.Printf("navigation resumed from in-app diagnostics: %s", rawURL)
+		a.navigationFailed = false
+		a.navigationAttempts = 1
+		a.initialNavSentAt = time.Now()
+		a.initialNavAcked = false
 	}
 }
 
@@ -542,10 +753,14 @@ func (a *desktopApp) handleSPAURLChange(rawURL string) {
 }
 
 func (a *desktopApp) handleWebViewState(state string) {
+	state = strings.TrimSpace(state)
+	a.lastWebViewState = state
 	log.Printf("webview state: %s", state)
-	switch strings.TrimSpace(state) {
-	case "loaded":
+	switch state {
+	case "bridge", "loaded":
 		a.initialNavAcked = true
+		a.navigationAttempts = 0
+		a.navigationFailed = false
 		a.reloadPending = false
 	}
 }
@@ -556,14 +771,44 @@ func (a *desktopApp) handlePlaybackState(state string) {
 		a.playbackActive = true
 		a.reloadPending = false
 		a.reloadDeferred = false
-		a.setPlaybackWakeLock(true)
+		a.updatePlaybackPlatform("playing")
 	case "paused", "ended", "released":
 		a.playbackActive = false
 		if a.reloadDeferred {
 			a.reloadDeferred = false
 			a.reloadPending = true
 		}
-		a.setPlaybackWakeLock(false)
+		state = strings.TrimSpace(state)
+		if state == "released" {
+			a.updatePlaybackPlatform("released")
+		} else {
+			// "ended" can fire before APlayer changes to the next track. Keep
+			// the media service alive through that transition so background
+			// playback is not torn down at the queue boundary.
+			a.updatePlaybackPlatform("paused")
+		}
+	}
+}
+
+func (a *desktopApp) handlePlaybackMetadata(raw string) {
+	metadata, err := parsePlaybackMetadata(raw)
+	if err != nil {
+		log.Printf("invalid playback metadata from webview: %v", err)
+		return
+	}
+	a.playbackMetadata = metadata
+	switch {
+	case metadata.Playing && !a.playbackActive:
+		// The periodic metadata bridge is also a fallback for a missed play
+		// event. Without this, audio can start while no foreground service is
+		// holding the process alive.
+		a.playbackActive = true
+		a.updatePlaybackPlatform("playing")
+	case !metadata.Playing && a.playbackActive:
+		a.playbackActive = false
+		a.updatePlaybackPlatform("paused")
+	default:
+		a.updatePlaybackMetadataPlatform()
 	}
 }
 
@@ -583,6 +828,44 @@ func consumeBackShortcuts(gtx layout.Context) bool {
 			continue
 		}
 		handled = true
+	}
+}
+
+func consumeTVNavigationShortcuts(gtx layout.Context) []string {
+	if runtime.GOOS != "android" {
+		return nil
+	}
+
+	var actions []string
+	for {
+		evt, ok := gtx.Event(
+			key.Filter{Name: key.NameUpArrow},
+			key.Filter{Name: key.NameDownArrow},
+			key.Filter{Name: key.NameLeftArrow},
+			key.Filter{Name: key.NameRightArrow},
+			key.Filter{Name: key.NameEnter},
+			key.Filter{Name: key.NameReturn},
+		)
+		if !ok {
+			return actions
+		}
+		ke, ok := evt.(key.Event)
+		if !ok || ke.State != key.Press {
+			continue
+		}
+
+		switch ke.Name {
+		case key.NameUpArrow:
+			actions = append(actions, "up")
+		case key.NameDownArrow:
+			actions = append(actions, "down")
+		case key.NameLeftArrow:
+			actions = append(actions, "left")
+		case key.NameRightArrow:
+			actions = append(actions, "right")
+		case key.NameEnter, key.NameReturn:
+			actions = append(actions, "enter")
+		}
 	}
 }
 

@@ -422,6 +422,9 @@ func exeAndroid(tmpDir string, tools *androidTools, bi *buildInfo, extraJars, pe
 		if err != nil {
 			return err
 		}
+		if err := buildAndroidBanner(resDir, bi.iconPath, 320, 180); err != nil {
+			return err
+		}
 		err = os.WriteFile(filepath.Join(v26mipmapDir, `ic_launcher.xml`), []byte(`<?xml version="1.0" encoding="utf-8"?>
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@mipmap/ic_launcher_adaptive" />
@@ -430,7 +433,7 @@ func exeAndroid(tmpDir string, tools *androidTools, bi *buildInfo, extraJars, pe
 		if err != nil {
 			return err
 		}
-		iconSnip = `android:icon="@mipmap/ic_launcher"`
+		iconSnip = `android:icon="@mipmap/ic_launcher" android:banner="@mipmap/tv_banner"`
 	}
 	err = os.WriteFile(filepath.Join(valDir, "themes.xml"), []byte(themes), 0o660)
 	if err != nil {
@@ -485,6 +488,8 @@ func exeAndroid(tmpDir string, tools *androidTools, bi *buildInfo, extraJars, pe
 {{range .Permissions}}	<uses-permission android:name="{{.}}"/>
 {{end}}{{range .Features}}	<uses-feature android:{{.}} android:required="false"/>
 {{end}}
+	<uses-feature android:name="android.software.leanback" android:required="false" />
+	<uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 	<uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
 	<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
 	<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
@@ -500,6 +505,7 @@ func exeAndroid(tmpDir string, tools *androidTools, bi *buildInfo, extraJars, pe
 			<intent-filter>
 				<action android:name="android.intent.action.MAIN" />
 				<category android:name="android.intent.category.LAUNCHER" />
+				<category android:name="android.intent.category.LEANBACK_LAUNCHER" />
 			</intent-filter>
 			{{range .Schemes}}
 			<intent-filter>

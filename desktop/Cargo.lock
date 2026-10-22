@@ -1551,9 +1551,11 @@ dependencies = [
 name = "music-dl-desktop-rust"
 version = "0.1.0"
 dependencies = [
+ "cc",
  "image",
  "open",
  "tao",
+ "windows",
  "winres",
  "wry",
 ]

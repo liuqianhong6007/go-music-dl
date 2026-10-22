@@ -9,6 +9,8 @@ git.wow.st/gmp/jni v0.0.0-20210610011705-34026c7e22d0 h1:bGG/g4ypjrCJoSvFrP5hafr
 git.wow.st/gmp/jni v0.0.0-20210610011705-34026c7e22d0/go.mod h1:+axXBRUTIDlCeE73IKeD/os7LoEnTKdkp8/gQOFjqyo=
 github.com/Ghibranalj/webview_go v0.0.0-20251019170756-f933bf214be3 h1:14BcewtjgN0jpNAcrqMsR9+HZgeMKA4o2p6gXREBjO8=
 github.com/Ghibranalj/webview_go v0.0.0-20251019170756-f933bf214be3/go.mod h1:bEeeYIHwmqw952yxgVy7pDBigi5R/szLd+ZQnORaOKc=
+github.com/adamzy/cedar-go v0.0.0-20170805034717-80a9c64b256d h1:ir/IFJU5xbja5UaBEQLjcvn7aAU01nqU/NUyOBEU+ew=
+github.com/adamzy/cedar-go v0.0.0-20170805034717-80a9c64b256d/go.mod h1:PRWNwWq0yifz6XDPZu48aSld8BWwBfr2JKB2bGWiEd4=
 github.com/atotto/clipboard v0.1.4 h1:EH0zSVneZPSuFR11BlR9YppQTVDbh5+16AmcJi4g1z4=
 github.com/atotto/clipboard v0.1.4/go.mod h1:ZY9tmq7sm5xIbd9bOK4onWV4S6X0u6GY7Vn0Yu86PYI=
 github.com/aymanbagabas/go-osc52/v2 v2.0.1 h1:HwpRHbFMcZLEVr42D4p7XBqjyuxQH5SMiErDT4WkJ2k=
@@ -84,8 +86,8 @@ github.com/google/pprof v0.0.0-20250317173921-a4b03ec1a45e h1:ijClszYn+mADRFY17k
 github.com/google/pprof v0.0.0-20250317173921-a4b03ec1a45e/go.mod h1:boTsfXsheKC2y+lKOCMpSfarhxDeIzfZG1jqGcPl3cA=
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
 github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
-github.com/guohuiyuan/music-lib v1.1.1-0.20260916154859-28e1080ba416 h1:k+po7yvWzcwt+4UmH/0xnZWNO5onmcWkP6fN/Dmkwtg=
-github.com/guohuiyuan/music-lib v1.1.1-0.20260916154859-28e1080ba416/go.mod h1:3NMmYFjK/xfh3+vFR6c+BetrxUrIts3zwTrlnbRyjU4=
+github.com/guohuiyuan/music-lib v1.1.1-0.20261018010056-7cc4467b4e30 h1:byvxLQqwoV988z4omQcWgTTglWnEhefN8ofwHuEkNGg=
+github.com/guohuiyuan/music-lib v1.1.1-0.20261018010056-7cc4467b4e30/go.mod h1:3NMmYFjK/xfh3+vFR6c+BetrxUrIts3zwTrlnbRyjU4=
 github.com/hashicorp/golang-lru/v2 v2.0.7 h1:a+bsQ5rvGLjzHuww6tVxozPZFVghXaHOwFs4luLUK2k=
 github.com/hashicorp/golang-lru/v2 v2.0.7/go.mod h1:QeFd9opnmA6QUJc5vARoKUSoFhyfM2/ZepoAG6RGpeM=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
@@ -106,6 +108,12 @@ github.com/klauspost/cpuid/v2 v2.3.0 h1:S4CRMLnYUhGeDFDqkGriYKdfoFlDnMtqTiI/sFzh
 github.com/klauspost/cpuid/v2 v2.3.0/go.mod h1:hqwkgyIinND0mEev00jJYCxPNVRVXFQeu1XKlok6oO0=
 github.com/leodido/go-urn v1.4.0 h1:WT9HwE9SGECu3lg4d/dIA+jxlljEa1/ffXKmRjqdmIQ=
 github.com/leodido/go-urn v1.4.0/go.mod h1:bvxc+MVxLKB4z00jd1z+Dvzr47oO32F/QSNjSBOlFxI=
+github.com/liuzl/cedar-go v0.0.0-20170805034717-80a9c64b256d h1:qSmEGTgjkESUX5kPMSGJ4pcBUtYVDdkNzMrjQyvRvp0=
+github.com/liuzl/cedar-go v0.0.0-20170805034717-80a9c64b256d/go.mod h1:x7SghIWwLVcJObXbjK7S2ENsT1cAcdJcPl7dRaSFog0=
+github.com/liuzl/da v0.0.0-20180704015230-14771aad5b1d h1:hTRDIpJ1FjS9ULJuEzu69n3qTgc18eI+ztw/pJv47hs=
+github.com/liuzl/da v0.0.0-20180704015230-14771aad5b1d/go.mod h1:7xD3p0XnHvJFQ3t/stEJd877CSIMkH/fACVWen5pYnc=
+github.com/liuzl/gocc v0.0.0-20231231122217-0372e1059ca5 h1:wnbHIeP1UX8ClYEWKGnw66PfYvReCHu9G5lXSte3Sqc=
+github.com/liuzl/gocc v0.0.0-20231231122217-0372e1059ca5/go.mod h1:7KaV9YIR92M1FpbczAcfYQ3UZ5ayT27pNtunDmXvLBo=
 github.com/lucasb-eyer/go-colorful v1.2.0 h1:1nnpGOrhyZZuNyfu1QjKiUICQ74+3FNCN69Aj6K7nkY=
 github.com/lucasb-eyer/go-colorful v1.2.0/go.mod h1:R4dSotOR9KMtayYi1e77YzuveK+i7ruzyGqttikkLy0=
 github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=

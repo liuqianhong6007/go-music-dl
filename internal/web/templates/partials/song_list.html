@@ -28,6 +28,15 @@
         </div>
 
         <div class="song-list-actions">
+            {{ if .ColID }}
+            <button type="button" class="ctrl-btn primary" data-container-kind="collection" data-container-id="{{.ColID}}" title="下载整个本地歌单，包含其他分页" onclick="downloadWholeCollection(this)"><i class="fa-solid fa-cloud-arrow-down"></i> {{ if eq .CollectionContentType "album" }}下载整张专辑{{ else }}下载整个歌单{{ end }}</button>
+            {{ else if and .ImportCollection .ImportCollection.Enabled }}
+            <button type="button" class="ctrl-btn primary"
+                    data-container-kind="{{.ImportCollection.ContentType}}" data-container-id="{{.ImportCollection.ExternalID}}" data-container-source="{{.ImportCollection.Source}}" data-container-link="{{.ImportCollection.Link}}"
+                    title="获取完整曲目并加入下载队列，包含所有分页" onclick="downloadWholeCollection(this)">
+                <i class="fa-solid fa-cloud-arrow-down"></i> {{ if eq .ImportCollection.ContentType "album" }}下载整张专辑{{ else }}下载整个歌单{{ end }}
+            </button>
+            {{ end }}
             {{ if .ImportCollection }}
             <button type="button"
                     class="ctrl-btn primary"
@@ -235,8 +244,8 @@
                 <div class="tags">
                     <span class="tag {{ if $isLocalSong }}tag-local{{ else }}tag-src{{ end }}">{{ if $isLocalSong }}本地{{ else }}{{ .Source }}{{ end }}</span>
                     <span class="tag tag-duration">{{ if .FormatDuration }}{{ .FormatDuration }}{{ else }}-{{ end }}</span>
-                    <span class="tag tag-loading" id="size-{{.ID}}"><i class="fa fa-spinner fa-spin"></i></span>
-                    <span class="tag tag-loading" id="bitrate-{{.ID}}"><i class="fa fa-circle-notch fa-spin"></i></span>
+                    <span class="tag tag-loading" id="size-{{.ID}}">-</span>
+                    <span class="tag tag-loading" id="bitrate-{{.ID}}">-</span>
                 </div>
             </div>
 
@@ -343,6 +352,10 @@
             <i class="fa-solid fa-chevron-left"></i> 上一页
         </button>
         <span class="pagination-text">第 {{ .Page }} / {{ .TotalPages }} 页</span>
+        <form class="page-jump" onsubmit="return submitPageJump(event,this)">
+            <label>跳至 <input type="number" min="1" max="{{ .TotalPages }}" step="1" value="{{ .Page }}" required aria-label="目标页码" inputmode="numeric"> 页</label>
+            <button type="submit" class="utility-modal-page-button" aria-label="跳转到指定页">跳转</button>
+        </form>
         <span class="pagination-shortcut-hint">PgUp / PgDn</span>
         <button type="button" class="ctrl-btn primary" onclick="goToPage({{ .Page }} + 1, {{ .PageSize }})" {{ if ge .Page .TotalPages }}disabled{{ end }}>
             下一页 <i class="fa-solid fa-chevron-right"></i>

@@ -141,6 +141,8 @@ type SearchFunc func(keyword string) ([]model.Song, error)
 type SearchPlaylistFunc func(keyword string) ([]model.Playlist, error)
 type PlaylistCategoriesFunc func() ([]model.PlaylistCategory, error)
 type CategoryPlaylistsFunc func(string, int, int) ([]model.Playlist, error)
+type TopListsFunc func() ([]model.TopList, error)
+type TopListSongsFunc func(topListID string) ([]model.Song, error)
 type QRLoginCreateFunc func() (*model.QRLoginSession, error)
 type QRLoginCheckFunc func(string) (*model.QRLoginResult, error)
 type UserPlaylistsFunc func(page, limit int) ([]model.Playlist, error)
@@ -169,7 +171,7 @@ func GetSearchFunc(source string) SearchFunc {
 	case "qianqian":
 		return qianqian.New(c).Search
 	case "soda":
-		return soda.New(c).Search
+		return NewSodaClient(c).Search
 	case "apple":
 		return apple.New(c).Search
 	default:
@@ -197,7 +199,7 @@ func GetAlbumSearchFunc(source string) SearchPlaylistFunc {
 	case "qianqian":
 		return qianqian.New(c).SearchAlbum
 	case "soda":
-		return soda.New(c).SearchAlbum
+		return NewSodaClient(c).SearchAlbum
 	case "apple":
 		return apple.New(c).SearchAlbum
 	default:
@@ -227,7 +229,7 @@ func GetPlaylistSearchFunc(source string) SearchPlaylistFunc {
 	case "bilibili":
 		return bilibili.New(c).SearchPlaylist
 	case "soda":
-		return soda.New(c).SearchPlaylist
+		return NewSodaClient(c).SearchPlaylist
 	case "fivesing":
 		return fivesing.New(c).SearchPlaylist
 	case "apple":
@@ -257,7 +259,7 @@ func GetAlbumDetailFunc(source string) func(string) ([]model.Song, error) {
 	case "qianqian":
 		return qianqian.New(c).GetAlbumSongs
 	case "soda":
-		return soda.New(c).GetAlbumSongs
+		return NewSodaClient(c).GetAlbumSongs
 	case "apple":
 		return apple.New(c).GetAlbumSongs
 	default:
@@ -287,7 +289,7 @@ func GetPlaylistDetailFunc(source string) func(string) ([]model.Song, error) {
 	case "bilibili":
 		return bilibili.New(c).GetPlaylistSongs
 	case "soda":
-		return soda.New(c).GetPlaylistSongs
+		return NewSodaClient(c).GetPlaylistSongs
 	case "fivesing":
 		return fivesing.New(c).GetPlaylistSongs
 	case "apple":
@@ -330,6 +332,8 @@ func GetPlaylistCategoriesFunc(source string) PlaylistCategoriesFunc {
 		return joox.New(c).GetPlaylistCategories
 	case "qianqian":
 		return qianqian.New(c).GetPlaylistCategories
+	case "soda":
+		return NewSodaClient(c).GetPlaylistCategories
 	case "apple":
 		return apple.New(c).GetPlaylistCategories
 	default:
@@ -354,8 +358,54 @@ func GetCategoryPlaylistsFunc(source string) CategoryPlaylistsFunc {
 		return joox.New(c).GetCategoryPlaylists
 	case "qianqian":
 		return qianqian.New(c).GetCategoryPlaylists
+	case "soda":
+		return NewSodaClient(c).GetCategoryPlaylists
 	case "apple":
 		return apple.New(c).GetCategoryPlaylists
+	default:
+		return nil
+	}
+}
+
+// GetTopListsFunc 返回指定平台的排行榜列表能力，不支持时返回 nil。
+func GetTopListsFunc(source string) TopListsFunc {
+	switch source {
+	case "netease":
+		return netease.New(CM.Get(source)).GetTopLists
+	case "qq":
+		return qq.New(CM.Get(source)).GetTopLists
+	case "kugou":
+		return kugou.New(CM.Get(source)).GetTopLists
+	case "kuwo":
+		return kuwo.New(CM.Get(source)).GetTopLists
+	case "soda":
+		return NewSodaClient(CM.Get(source)).GetTopLists
+	case "migu":
+		return migu.New(CM.Get(source)).GetTopLists
+	case "apple":
+		return apple.New(CM.Get(source)).GetTopLists
+	default:
+		return nil
+	}
+}
+
+// GetTopListSongsFunc 返回指定平台的榜单歌曲能力，不支持时返回 nil。
+func GetTopListSongsFunc(source string) TopListSongsFunc {
+	switch source {
+	case "netease":
+		return netease.New(CM.Get(source)).GetTopListSongs
+	case "qq":
+		return qq.New(CM.Get(source)).GetTopListSongs
+	case "kugou":
+		return kugou.New(CM.Get(source)).GetTopListSongs
+	case "kuwo":
+		return kuwo.New(CM.Get(source)).GetTopListSongs
+	case "soda":
+		return NewSodaClient(CM.Get(source)).GetTopListSongs
+	case "migu":
+		return migu.New(CM.Get(source)).GetTopListSongs
+	case "apple":
+		return apple.New(CM.Get(source)).GetTopListSongs
 	default:
 		return nil
 	}
@@ -413,7 +463,7 @@ func GetUserPlaylistsFunc(source string) UserPlaylistsFunc {
 	case "kugou":
 		return kugou.New(c).GetUserPlaylists
 	case "soda":
-		return soda.New(c).GetUserPlaylists
+		return NewSodaClient(c).GetUserPlaylists
 	default:
 		return nil
 	}
@@ -441,7 +491,7 @@ func GetDownloadFunc(source string) func(*model.Song) (string, error) {
 	case "migu":
 		return migu.New(c).GetDownloadURL
 	case "soda":
-		return soda.New(c).GetDownloadURL
+		return NewSodaClient(c).GetDownloadURL
 	case "bilibili":
 		return bilibili.New(c).GetDownloadURL
 	case "fivesing":
@@ -473,7 +523,7 @@ func GetLyricFunc(source string) func(*model.Song) (string, error) {
 	case "migu":
 		return migu.New(c).GetLyrics
 	case "soda":
-		return soda.New(c).GetLyrics
+		return NewSodaClient(c).GetLyrics
 	case "bilibili":
 		return bilibili.New(c).GetLyrics
 	case "fivesing":
@@ -505,7 +555,7 @@ func GetParseFunc(source string) func(string) (*model.Song, error) {
 	case "migu":
 		return migu.New(c).Parse
 	case "soda":
-		return soda.New(c).Parse
+		return NewSodaClient(c).Parse
 	case "bilibili":
 		return bilibili.New(c).Parse
 	case "fivesing":
@@ -545,7 +595,7 @@ func GetParsePlaylistFunc(source string) func(string) (*model.Playlist, []model.
 	case "bilibili":
 		return bilibili.New(c).ParsePlaylist
 	case "soda":
-		return soda.New(c).ParsePlaylist
+		return NewSodaClient(c).ParsePlaylist
 	case "fivesing":
 		return fivesing.New(c).ParsePlaylist
 	case "apple":
@@ -575,7 +625,7 @@ func GetParseAlbumFunc(source string) func(string) (*model.Playlist, []model.Son
 	case "qianqian":
 		return qianqian.New(c).ParseAlbum
 	case "soda":
-		return soda.New(c).ParseAlbum
+		return NewSodaClient(c).ParseAlbum
 	case "apple":
 		return apple.New(c).ParseAlbum
 	default:
@@ -717,6 +767,10 @@ func GetOriginalLink(source, id, typeStr string) string {
 	case "bilibili":
 		return "https://www.bilibili.com/video/" + id
 	case "apple":
+		// Apple 榜单 ID 形如 most-played:songs:cn，没有独立页面，回退到官方排行榜页。
+		if parts := strings.Split(id, ":"); len(parts) == 3 && parts[0] == "most-played" {
+			return "https://music.apple.com/" + parts[2] + "/new/top-charts"
+		}
 		if typeStr == "album" {
 			return "https://music.apple.com/album/" + id
 		}
@@ -1015,7 +1069,11 @@ func GetAlbumSourceNames() []string {
 }
 
 func GetPlaylistCategorySourceNames() []string {
-	return []string{"netease", "qq", "kugou", "kuwo", "migu", "qianqian", "joox", "apple"}
+	return []string{"netease", "qq", "kugou", "kuwo", "migu", "qianqian", "joox", "soda", "apple"}
+}
+
+func GetTopListSourceNames() []string {
+	return []string{"netease", "qq", "kugou", "kuwo", "soda", "migu", "apple"}
 }
 
 func GetDefaultSourceNames() []string {

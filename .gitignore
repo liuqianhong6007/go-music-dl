@@ -32,3 +32,4 @@ build_log.txt
 test_import.txt
 sync_and_pr.bat
 docker/
+tmp/

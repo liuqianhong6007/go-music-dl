@@ -238,6 +238,40 @@ func buildIcons(baseDir, icon string, variants []iconVariant) error {
 	return resizes.Wait()
 }
 
+func buildAndroidBanner(baseDir, icon string, width, height int) error {
+	f, err := os.Open(icon)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	src, _, err := image.Decode(f)
+	if err != nil {
+		return err
+	}
+
+	banner := image.NewNRGBA(image.Rect(0, 0, width, height))
+	draw.Draw(banner, banner.Bounds(), &image.Uniform{color.RGBA{R: 15, G: 23, B: 42, A: 255}}, image.Point{}, draw.Src)
+
+	iconSize := height - 20
+	iconOffsetY := (height - iconSize) / 2
+	iconRect := image.Rect((width-iconSize)/2, iconOffsetY, (width+iconSize)/2, iconOffsetY+iconSize)
+	scaled := image.NewNRGBA(image.Rect(0, 0, iconSize, iconSize))
+	draw.CatmullRom.Scale(scaled, scaled.Bounds(), src, src.Bounds(), draw.Over, nil)
+	draw.Draw(banner, iconRect, scaled, image.Point{}, draw.Over)
+
+	path := filepath.Join(baseDir, "mipmap-xhdpi", "tv_banner.png")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	out, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	return png.Encode(out, banner)
+}
+
 func resizeIcon(v iconVariant, img image.Image) *image.NRGBA {
 	scaled := image.NewNRGBA(image.Rectangle{Max: image.Point{X: v.size, Y: v.size}})
 	op := draw.Src

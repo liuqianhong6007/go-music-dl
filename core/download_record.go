@@ -173,8 +173,8 @@ func ClearDownloadRecords() error {
 
 // SongKey generates a stable de-duplication key from artist and title.
 func SongKey(song *model.Song) string {
-	artist := cleanDownloadRecordText(song.Artist)
-	name := cleanDownloadRecordText(song.Name)
+	artist := normalizeVariantText(cleanDownloadRecordText(song.Artist))
+	name := normalizeVariantText(cleanDownloadRecordText(song.Name))
 	if artist == "" {
 		artist = "Unknown"
 	}
@@ -186,6 +186,24 @@ func SongKey(song *model.Song) string {
 
 func songKeyFromParts(name, artist string) string {
 	return SongKey(&model.Song{Name: name, Artist: artist})
+}
+
+func lookupSongKey(song *model.Song, index DownloadDedupIndex) (string, string, bool) {
+	if index == nil {
+		return "", "", false
+	}
+	key := SongKey(song)
+	if relPath, ok := index[key]; ok {
+		return key, relPath, true
+	}
+
+	normalizedKey := normalizeVariantText(key)
+	for existingKey, relPath := range index {
+		if normalizeVariantText(existingKey) == normalizedKey {
+			return existingKey, relPath, true
+		}
+	}
+	return "", "", false
 }
 
 func stripControl(value string) string {
@@ -232,19 +250,14 @@ func DownloadFileExists(outDir, relPath string) bool {
 
 // SongFileRelPath 返回去重索引里记录的文件相对路径（"" 表示没有记录或路径未知）。
 func SongFileRelPath(song *model.Song, index DownloadDedupIndex) string {
-	if index == nil {
-		return ""
-	}
-	return index[SongKey(song)]
+	_, relPath, _ := lookupSongKey(song, index)
+	return relPath
 }
 
 // IsSongDownloaded 只查去重索引，不校验磁盘。需要判断「现在还能不能跳过」时用
 // IsSongStillDownloaded。
 func IsSongDownloaded(song *model.Song, index DownloadDedupIndex) bool {
-	if index == nil {
-		return false
-	}
-	_, exists := index[SongKey(song)]
+	_, _, exists := lookupSongKey(song, index)
 	return exists
 }
 
@@ -255,8 +268,7 @@ func IsSongStillDownloaded(song *model.Song, index DownloadDedupIndex, outDir st
 	if index == nil {
 		return false
 	}
-	key := SongKey(song)
-	relPath, exists := index[key]
+	key, relPath, exists := lookupSongKey(song, index)
 	if !exists {
 		return false
 	}

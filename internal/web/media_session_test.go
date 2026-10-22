@@ -60,6 +60,12 @@ func TestAppJSPlaybackShortcutAndMediaKeys(t *testing.T) {
 	required := []string{
 		"function togglePlayback()",
 		"function handlePlaybackShortcut(event)",
+		"function normalizeShortcutBinding(binding)",
+		"function shortcutBindingFromKeyboardEvent(event)",
+		"function readPlaybackShortcutSettingsFromForm()",
+		"function applyLyricAppearance()",
+		"webSettings.shortcutPrevious",
+		"webSettings.shortcutSeekForward",
 		`document.addEventListener("keydown", handlePlaybackShortcut);`,
 		"function bindMediaKeyFallback()",
 		"bindMediaKeyFallback();",
@@ -71,6 +77,49 @@ func TestAppJSPlaybackShortcutAndMediaKeys(t *testing.T) {
 	for _, token := range required {
 		if !strings.Contains(js, token) {
 			t.Fatalf("app.js missing %q", token)
+		}
+	}
+}
+
+func TestPlaybackShortcutAndLyricSettingsUi(t *testing.T) {
+	modalContent, err := templateFS.ReadFile("templates/partials/modals.html")
+	if err != nil {
+		t.Fatalf("ReadFile(modals.html): %v", err)
+	}
+	html := string(modalContent)
+	for _, want := range []string{
+		`id="setting-shortcut-play-pause"`,
+		`id="setting-shortcut-previous"`,
+		`id="setting-shortcut-next"`,
+		`id="setting-shortcut-seek-back"`,
+		`id="setting-shortcut-seek-forward"`,
+		`id="setting-shortcut-status"`,
+		`id="setting-lyric-font-family"`,
+		`id="setting-lyric-font-size"`,
+		`id="setting-lyric-font-preview"`,
+		`应用内全局快捷键`,
+		`PageUp / PageDown 保留给列表翻页`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("modals.html missing playback setting token %q", want)
+		}
+	}
+
+	cssContent, err := templateFS.ReadFile("templates/static/css/style.css")
+	if err != nil {
+		t.Fatalf("ReadFile(style.css): %v", err)
+	}
+	css := string(cssContent)
+	for _, want := range []string{
+		"--lyric-font-family",
+		"--lyric-font-size",
+		".shortcut-setting-row",
+		".lyric-font-preview",
+		"font-size: var(--lyric-font-size)",
+		"font-family: var(--lyric-font-family) !important",
+	} {
+		if !strings.Contains(css, want) {
+			t.Fatalf("style.css missing playback setting token %q", want)
 		}
 	}
 }

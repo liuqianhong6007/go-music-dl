@@ -11,6 +11,10 @@ import (
 )
 
 func main() {
+	if _, err := prepareDesktopDataDir(); err != nil {
+		log.Fatalf("desktop data directory setup failed: %v", err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), appshell.ReadyTimeout)
 	defer cancel()
 
@@ -21,6 +25,10 @@ func main() {
 	}
 
 	w := webview.New(false)
+	defer w.Destroy()
+	if err := configureNativeDesktop(w); err != nil {
+		log.Printf("native desktop setup failed: %v", err)
+	}
 	w.SetTitle("music-dl-desktop-go")
 	w.SetSize(1350, 780, webview.Hint(webview.HintNone))
 	w.Navigate(target)

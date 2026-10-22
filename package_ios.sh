@@ -42,22 +42,102 @@ add_local_networking_exception() {
   /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$plist" >/dev/null 2>&1 || true
   /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsLocalNetworking true" "$plist" >/dev/null 2>&1 || \
     /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$plist" >/dev/null
+  /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsArbitraryLoadsInWebContent true" "$plist" >/dev/null 2>&1 || \
+    /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoadsInWebContent bool true" "$plist" >/dev/null
   /usr/libexec/PlistBuddy -c "Set :NSLocalNetworkUsageDescription MusicDL uses the local network to connect to its embedded web server." "$plist" >/dev/null 2>&1 || \
     /usr/libexec/PlistBuddy -c "Add :NSLocalNetworkUsageDescription string MusicDL uses the local network to connect to its embedded web server." "$plist" >/dev/null
+  plutil -lint "$plist" >/dev/null
   plutil -convert binary1 "$plist"
 
-  local ats_value
-  ats_value="$(plutil -extract NSAppTransportSecurity.NSAllowsLocalNetworking raw -o - "$plist")"
-  if [[ "$ats_value" != "1" && "$ats_value" != "true" ]]; then
+  local local_networking
+  local web_content
+  local_networking="$(plutil -extract NSAppTransportSecurity.NSAllowsLocalNetworking raw -o - "$plist")"
+  web_content="$(plutil -extract NSAppTransportSecurity.NSAllowsArbitraryLoadsInWebContent raw -o - "$plist")"
+  if [[ "$local_networking" != "1" && "$local_networking" != "true" ]]; then
     echo "ERROR: failed to set NSAllowsLocalNetworking in Info.plist."
+    exit 1
+  fi
+  if [[ "$web_content" != "1" && "$web_content" != "true" ]]; then
+    echo "ERROR: failed to set NSAllowsArbitraryLoadsInWebContent in Info.plist."
     exit 1
   fi
 }
 
+verify_app_bundle() {
+  local app_dir="$1"
+  local plist="$app_dir/Info.plist"
+  local executable_name
+  local executable
+  local bundle_type
+  local minimum_os
+  local archs
+  local local_networking
+  local web_content
+
+  if [[ ! -d "$app_dir" || ! -f "$plist" ]]; then
+    echo "ERROR: invalid iOS app bundle: $app_dir"
+    exit 1
+  fi
+  plutil -lint "$plist" >/dev/null
+
+  executable_name="$(plutil -extract CFBundleExecutable raw -o - "$plist")"
+  if [[ -z "$executable_name" ]]; then
+    echo "ERROR: Info.plist has no CFBundleExecutable."
+    exit 1
+  fi
+  executable="$app_dir/$executable_name"
+  if [[ ! -f "$executable" || ! -x "$executable" ]]; then
+    echo "ERROR: iOS executable is missing or not executable: $executable"
+    exit 1
+  fi
+
+  bundle_type="$(plutil -extract CFBundlePackageType raw -o - "$plist")"
+  if [[ "$bundle_type" != "APPL" ]]; then
+    echo "ERROR: CFBundlePackageType is $bundle_type, expected APPL."
+    exit 1
+  fi
+
+  minimum_os="$(plutil -extract MinimumOSVersion raw -o - "$plist")"
+  if [[ -z "$minimum_os" ]]; then
+    echo "ERROR: Info.plist has no MinimumOSVersion."
+    exit 1
+  fi
+
+  archs="$(lipo -archs "$executable")"
+  if [[ " $archs " != *" arm64 "* ]]; then
+    echo "ERROR: iOS executable does not contain arm64 (architectures: $archs)."
+    exit 1
+  fi
+
+  local_networking="$(plutil -extract NSAppTransportSecurity.NSAllowsLocalNetworking raw -o - "$plist")"
+  web_content="$(plutil -extract NSAppTransportSecurity.NSAllowsArbitraryLoadsInWebContent raw -o - "$plist")"
+  if [[ "$local_networking" != "1" && "$local_networking" != "true" ]]; then
+    echo "ERROR: NSAllowsLocalNetworking is not enabled in the app bundle."
+    exit 1
+  fi
+  if [[ "$web_content" != "1" && "$web_content" != "true" ]]; then
+    echo "ERROR: NSAllowsArbitraryLoadsInWebContent is not enabled in the app bundle."
+    exit 1
+  fi
+
+  echo "Verified iOS bundle: executable=$executable_name archs=$archs minimumOS=$minimum_os"
+}
+
 verify_ipa() {
   local ipa="$1"
+  unzip -tq "$ipa" >/dev/null
   unzip -l "$ipa" | grep -E 'Payload/[^/]+\.app/Info\.plist' >/dev/null
   unzip -l "$ipa" | grep -E 'Payload/[^/]+\.app/MusicDL$' >/dev/null
+}
+
+write_checksum() {
+  local ipa_abs="$1"
+  local ipa_dir
+  local ipa_name
+  ipa_dir="$(dirname "$ipa_abs")"
+  ipa_name="$(basename "$ipa_abs")"
+  (cd "$ipa_dir" && shasum -a 256 "$ipa_name" > "$ipa_name.sha256")
+  echo "SHA256: $(cat "$ipa_abs.sha256")"
 }
 
 build_unsigned_package() {
@@ -96,8 +176,10 @@ build_unsigned_package() {
   fi
 
   add_local_networking_exception "$app_dir"
+  verify_app_bundle "$app_dir"
   (cd "$workdir" && zip -qr "$output_abs" Payload)
   verify_ipa "$output_abs"
+  write_checksum "$output_abs"
 
   echo "Built unsigned iOS signing package: $IOS_UNSIGNED_OUTPUT"
   echo "This package is for re-signing only and cannot be installed directly."
@@ -157,6 +239,7 @@ EOF
   fi
 
   add_local_networking_exception "$app_dir"
+  verify_app_bundle "$app_dir"
 
   sign_identity="${IOS_CODESIGN_IDENTITY:-}"
   if [[ -z "$sign_identity" ]]; then
@@ -172,10 +255,12 @@ EOF
 
   codesign --force --deep --sign "$sign_identity" --entitlements "$entitlements_plist" "$app_dir"
   codesign --verify --deep --strict "$app_dir"
+  verify_app_bundle "$app_dir"
 
   rm -f "$output_abs"
   (cd "$ipa_dir" && zip -qr "$output_abs" Payload)
   verify_ipa "$output_abs"
+  write_checksum "$output_abs"
 
   echo "Built signed iOS IPA: $IOS_OUTPUT"
 }

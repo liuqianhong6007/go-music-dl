@@ -31,7 +31,6 @@ import (
 	"github.com/guohuiyuan/music-lib/netease"
 	"github.com/guohuiyuan/music-lib/qianqian"
 	"github.com/guohuiyuan/music-lib/qq"
-	"github.com/guohuiyuan/music-lib/soda"
 )
 
 // --- 常量与样式 ---
@@ -177,7 +176,7 @@ func getSearchFunc(source string) func(string) ([]model.Song, error) {
 	case "migu":
 		return migu.New(c).Search
 	case "soda":
-		return soda.New(c).Search
+		return core.NewSodaClient(c).Search
 	case "bilibili":
 		return bilibili.New(c).Search
 	case "fivesing":
@@ -209,7 +208,7 @@ func getDownloadFunc(source string) func(*model.Song) (string, error) {
 	case "migu":
 		return migu.New(c).GetDownloadURL
 	case "soda":
-		return soda.New(c).GetDownloadURL
+		return core.NewSodaClient(c).GetDownloadURL
 	case "bilibili":
 		return bilibili.New(c).GetDownloadURL
 	case "fivesing":
@@ -241,7 +240,7 @@ func getLyricFunc(source string) func(*model.Song) (string, error) {
 	case "migu":
 		return migu.New(c).GetLyrics
 	case "soda":
-		return soda.New(c).GetLyrics
+		return core.NewSodaClient(c).GetLyrics
 	case "bilibili":
 		return bilibili.New(c).GetLyrics
 	case "fivesing":
@@ -274,7 +273,7 @@ func getParseFunc(source string) func(string) (*model.Song, error) {
 	case "migu":
 		return migu.New(c).Parse
 	case "soda":
-		return soda.New(c).Parse
+		return core.NewSodaClient(c).Parse
 	case "bilibili":
 		return bilibili.New(c).Parse
 	case "fivesing":
@@ -315,7 +314,7 @@ func getPlaylistSearchFunc(source string) func(string) ([]model.Playlist, error)
 	case "bilibili":
 		return bilibili.New(c).SearchPlaylist
 	case "soda":
-		return soda.New(c).SearchPlaylist
+		return core.NewSodaClient(c).SearchPlaylist
 	case "fivesing":
 		return fivesing.New(c).SearchPlaylist
 	case "apple":
@@ -345,7 +344,7 @@ func getAlbumSearchFunc(source string) func(string) ([]model.Playlist, error) {
 	case "qianqian":
 		return qianqian.New(c).SearchAlbum
 	case "soda":
-		return soda.New(c).SearchAlbum
+		return core.NewSodaClient(c).SearchAlbum
 	case "apple":
 		return apple.New(c).SearchAlbum
 	default:
@@ -376,7 +375,7 @@ func getPlaylistDetailFunc(source string) func(string) ([]model.Song, error) {
 	case "bilibili":
 		return bilibili.New(c).GetPlaylistSongs
 	case "soda":
-		return soda.New(c).GetPlaylistSongs
+		return core.NewSodaClient(c).GetPlaylistSongs
 	case "fivesing":
 		return fivesing.New(c).GetPlaylistSongs
 	case "apple":
@@ -406,7 +405,7 @@ func getAlbumDetailFunc(source string) func(string) ([]model.Song, error) {
 	case "qianqian":
 		return qianqian.New(c).GetAlbumSongs
 	case "soda":
-		return soda.New(c).GetAlbumSongs
+		return core.NewSodaClient(c).GetAlbumSongs
 	case "apple":
 		return apple.New(c).GetAlbumSongs
 	default:
@@ -454,7 +453,7 @@ func getParsePlaylistFunc(source string) func(string) (*model.Playlist, []model.
 	case "bilibili":
 		return bilibili.New(c).ParsePlaylist
 	case "soda":
-		return soda.New(c).ParsePlaylist
+		return core.NewSodaClient(c).ParsePlaylist
 	case "fivesing":
 		return fivesing.New(c).ParsePlaylist
 	case "apple":
@@ -484,7 +483,7 @@ func getParseAlbumFunc(source string) func(string) (*model.Playlist, []model.Son
 	case "qianqian":
 		return qianqian.New(c).ParseAlbum
 	case "soda":
-		return soda.New(c).ParseAlbum
+		return core.NewSodaClient(c).ParseAlbum
 	case "apple":
 		return apple.New(c).ParseAlbum
 	default:

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/guohuiyuan/go-music-dl/core"
 	"github.com/guohuiyuan/music-lib/model"
@@ -283,6 +284,98 @@ func TestLocalMusicIndexSyncUpsertsAndSweeps(t *testing.T) {
 	if dropCount != 0 {
 		t.Fatalf("swept row still present for %s", dropID)
 	}
+}
+
+func TestHydrateLocalMusicMetaCacheReusesPersistedMetadata(t *testing.T) {
+	initCollectionDBForTest(t)
+
+	downloadDir := t.TempDir()
+	withLocalMusicDownloadDir(t, downloadDir)
+	audioPath := filepath.Join(downloadDir, "Indexed Song.mp3")
+	if err := os.WriteFile(audioPath, []byte("not a real audio tag"), 0644); err != nil {
+		t.Fatalf("write audio: %v", err)
+	}
+	info, err := os.Stat(audioPath)
+	if err != nil {
+		t.Fatalf("stat audio: %v", err)
+	}
+
+	const relPath = "Indexed Song.mp3"
+	row := LocalMusicIndex{
+		ID:       encodeLocalMusicID(relPath),
+		RelPath:  relPath,
+		Name:     "Persisted Title",
+		Artist:   "Persisted Artist",
+		Album:    "Persisted Album",
+		Duration: 123,
+		Size:     info.Size(),
+		Ext:      "mp3",
+		ModTime:  info.ModTime(),
+	}
+	if err := db.Create(&row).Error; err != nil {
+		t.Fatalf("seed index row: %v", err)
+	}
+
+	rootAbs, err := filepath.Abs(downloadDir)
+	if err != nil {
+		t.Fatalf("resolve download dir: %v", err)
+	}
+	hydrateLocalMusicMetaCacheFromIndex(rootAbs)
+
+	cached := getCachedLocalMusicTrack(rootAbs, relPath, info.Size(), info.ModTime())
+	if cached == nil {
+		t.Fatal("persisted index row was not loaded into the metadata cache")
+	}
+	if cached.Name != row.Name || cached.Artist != row.Artist || cached.Duration != row.Duration {
+		t.Fatalf("cached track = %+v, want persisted metadata", cached)
+	}
+
+	track, err := buildLocalMusicTrackFast(rootAbs, audioPath)
+	if err != nil {
+		t.Fatalf("build track from cache: %v", err)
+	}
+	if track.Name != row.Name || track.Duration != row.Duration {
+		t.Fatalf("fast track = %+v, want persisted metadata", track)
+	}
+}
+
+func TestRefreshLocalMusicScanAsyncIfStaleRespectsTTL(t *testing.T) {
+	initCollectionDBForTest(t)
+
+	downloadDir := t.TempDir()
+	withLocalMusicDownloadDir(t, downloadDir)
+	storeLocalMusicScanSnapshot(localMusicScanSnapshot{
+		Dir:       downloadDir,
+		Exists:    true,
+		ScannedAt: time.Now(),
+	})
+
+	if refreshLocalMusicScanAsyncIfStale(downloadDir) {
+		t.Fatal("fresh scan snapshot should not start another full scan")
+	}
+	localMusicScanRefreshMu.Lock()
+	refreshing := localMusicScanRefreshInFlight
+	localMusicScanRefreshMu.Unlock()
+	if refreshing {
+		t.Fatal("fresh scan snapshot left a refresh running")
+	}
+}
+
+func TestRefreshLocalMusicScanAsyncIfStaleStartsStaleScan(t *testing.T) {
+	initCollectionDBForTest(t)
+
+	downloadDir := t.TempDir()
+	withLocalMusicDownloadDir(t, downloadDir)
+	storeLocalMusicScanSnapshot(localMusicScanSnapshot{
+		Dir:       downloadDir,
+		Exists:    true,
+		ScannedAt: time.Now().Add(-localMusicScanCacheTTL - time.Second),
+	})
+
+	if !refreshLocalMusicScanAsyncIfStale(downloadDir) {
+		t.Fatal("stale scan snapshot should start a refresh")
+	}
+	waitForLocalMusicScanRefresh(t)
 }
 
 func TestLoadTracksFromIndexDropsStaleRowsAndCorrectsTotal(t *testing.T) {

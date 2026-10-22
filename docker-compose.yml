@@ -6,8 +6,11 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      # 🌟 核心修正：挂载到程序实际的运行目录 /home/appuser/data 下
-      - ./data:/home/appuser/data
+      - type: bind
+        source: ./data
+        target: /home/appuser/data
+        bind:
+          create_host_path: true
     environment:
       - TZ=Asia/Shanghai
     command: [ "./music-dl", "web", "--port", "8080", "--no-browser" ]

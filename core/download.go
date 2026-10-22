@@ -128,7 +128,30 @@ func saveDownloadedSongToFile(result *DownloadedSong, outDir string) (*Downloade
 	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(filePath, result.Data, 0644); err != nil {
+	// Commit only a complete file. A killed download must not leave a partial
+	// audio file that a later local-library scan could mistake for a success.
+	temporary, err := os.CreateTemp(filepath.Dir(filePath), ".musicdl-*.part")
+	if err != nil {
+		return nil, err
+	}
+	temporaryPath := temporary.Name()
+	defer func() { _ = os.Remove(temporaryPath) }()
+	if _, err = temporary.Write(result.Data); err != nil {
+		_ = temporary.Close()
+		return nil, err
+	}
+	if err = temporary.Chmod(0644); err != nil {
+		_ = temporary.Close()
+		return nil, err
+	}
+	if err = temporary.Sync(); err != nil {
+		_ = temporary.Close()
+		return nil, err
+	}
+	if err = temporary.Close(); err != nil {
+		return nil, err
+	}
+	if err = os.Rename(temporaryPath, filePath); err != nil {
 		return nil, err
 	}
 
@@ -150,6 +173,9 @@ func BuildDownloadFilename(song *model.Song, ext string, filenameTemplate string
 	source := ""
 	id := ""
 	if song != nil {
+		if GetWebSettings().NormalizeChineseVariants {
+			song = NormalizeSongForDownload(song)
+		}
 		if strings.TrimSpace(song.Name) != "" {
 			name = strings.TrimSpace(song.Name)
 		}
@@ -227,7 +253,7 @@ func sanitizeDownloadPathSegment(value string) string {
 // FetchDecryptedSodaAudio 下载并解密 soda（汽水）加密音频流，返回明文音频字节。
 func FetchDecryptedSodaAudio(song *model.Song) ([]byte, error) {
 	cookie := CM.Get("soda")
-	sodaInst := soda.New(cookie)
+	sodaInst := NewSodaClient(cookie)
 	info, err := sodaInst.GetDownloadInfo(song)
 	if err != nil {
 		return nil, err

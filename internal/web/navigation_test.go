@@ -117,7 +117,7 @@ func TestDetailPagePathDetection(t *testing.T) {
 			t.Fatalf("isDetailPagePath(%q) = false, want true", requestPath)
 		}
 	}
-	for _, requestPath := range []string{"/", "/search", "/playlist_categories", "/my_collections", "/local_music_page"} {
+	for _, requestPath := range []string{"/", "/search", "/playlist_categories", "/toplists", "/toplist_songs", "/my_collections", "/local_music_page"} {
 		if isDetailPagePath(requestPath) {
 			t.Fatalf("isDetailPagePath(%q) = true, want false", requestPath)
 		}
@@ -440,6 +440,7 @@ func TestSettingsModalIncludesDownloadDirPresets(t *testing.T) {
 		`id="setting-auto-cache-on-play"`,
 		`id="setting-floating-lyrics"`,
 		`id="setting-auto-switch-invalid-sources"`,
+		`id="setting-soda-client-dir"`,
 		`onclick="openAboutAppModal()"`,
 		`关于 go-music-dl`,
 		`class="cookie-item setting-item setting-link-row"`,
@@ -488,7 +489,7 @@ func TestDefaultPageSizePrompts(t *testing.T) {
 		t.Fatalf("ReadFile(app.js): %v", err)
 	}
 	for _, want := range []string{
-		`const DEFAULT_WEB_PAGE_SIZE = 200;`,
+		`const DEFAULT_WEB_PAGE_SIZE = 50;`,
 		`const DEFAULT_CLI_PAGE_SIZE = 20;`,
 	} {
 		if !strings.Contains(string(jsContent), want) {
@@ -503,13 +504,42 @@ func TestDefaultPageSizePrompts(t *testing.T) {
 	html := string(modalContent)
 	for _, want := range []string{
 		`id="setting-web-page-size" aria-label="Web 每页条数"`,
-		`搜索结果列表每页显示的歌曲数量，默认 200。`,
+		`<option value="50" selected>50 条/页（默认）</option>`,
+		`搜索结果列表每页显示的歌曲数量，默认 50。`,
 		`id="setting-cli-page-size" min="1" max="200" step="1" placeholder="默认 20"`,
 		`用于 TUI 分页显示，默认 20。`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("modals.html missing page size prompt %q", want)
 		}
+	}
+}
+
+func TestInspectQueueUsesAdaptivePerSourceLimitingAndIsCancelable(t *testing.T) {
+	content, err := templateFS.ReadFile("templates/static/js/app.js")
+	if err != nil {
+		t.Fatalf("ReadFile(app.js): %v", err)
+	}
+	js := string(content)
+	for _, want := range []string{
+		`const INSPECT_REQUEST_DELAY_MS = 20;`,
+		`const INSPECT_MAX_CONCURRENCY = 50;`,
+		`const INSPECT_SOURCE_MAX_CONCURRENCY = 32;`,
+		`const INSPECT_SOURCE_MIN_CONCURRENCY = 4;`,
+		`const inspectActiveRequests = new Map();`,
+		`inspectActiveRequests.size < INSPECT_MAX_CONCURRENCY`,
+		`const inspectSourceStates = new Map();`,
+		`function recordInspectSourcePressure(source, requestedDelay = 0)`,
+		`function scheduleInspectPump(delay = 0)`,
+		`function cancelPendingSongInspections()`,
+		`controller.abort();`,
+	} {
+		if !strings.Contains(js, want) {
+			t.Fatalf("app.js missing inspect queue invariant %q", want)
+		}
+	}
+	if got := strings.Count(js, "cancelPendingSongInspections();"); got < 2 {
+		t.Fatalf("cancelPendingSongInspections call count = %d, want at least 2", got)
 	}
 }
 

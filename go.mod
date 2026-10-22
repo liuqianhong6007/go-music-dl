@@ -13,15 +13,19 @@ require (
 	github.com/gin-gonic/gin v1.11.0
 	github.com/gioui-plugins/gio-plugins v0.9.2
 	github.com/glebarez/sqlite v1.11.0
-	github.com/guohuiyuan/music-lib v1.1.1-0.20260916154859-28e1080ba416
+	github.com/guohuiyuan/music-lib v1.1.1-0.20261018010056-7cc4467b4e30
 	github.com/jchv/go-webview2 v0.0.0-20260205173254-56598839c808
+	github.com/liuzl/gocc v0.0.0-20231231122217-0372e1059ca5
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/crypto v0.53.0
+	golang.org/x/sys v0.46.0
+	golang.org/x/text v0.39.0
 	gorm.io/gorm v1.31.1
 )
 
 require (
 	gioui.org/shader v1.0.8 // indirect
+	github.com/adamzy/cedar-go v0.0.0-20170805034717-80a9c64b256d // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/bytedance/sonic v1.14.0 // indirect
@@ -54,6 +58,8 @@ require (
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
+	github.com/liuzl/cedar-go v0.0.0-20170805034717-80a9c64b256d // indirect
+	github.com/liuzl/da v0.0.0-20180704015230-14771aad5b1d // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-localereader v0.0.1 // indirect
@@ -82,8 +88,6 @@ require (
 	golang.org/x/mod v0.37.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
-	golang.org/x/text v0.39.0 // indirect
 	golang.org/x/tools v0.47.0 // indirect
 	google.golang.org/protobuf v1.36.9 // indirect
 	modernc.org/libc v1.67.6 // indirect

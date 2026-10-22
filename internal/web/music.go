@@ -349,6 +349,296 @@ func playlistCategoryPlaylistsURL(source string, category model.PlaylistCategory
 	return RoutePrefix + "/category_playlists?" + values.Encode()
 }
 
+type topListPageItem struct {
+	ID              string
+	Name            string
+	Cover           string
+	Description     string
+	UpdateFrequency string
+	TrackCount      int
+	PlayCount       string
+	Source          string
+	URL             string
+}
+
+type topListPageSource struct {
+	Source   string
+	Name     string
+	Count    int
+	TopLists []topListPageItem
+}
+
+type topListCurrent struct {
+	Source          string
+	SourceName      string
+	TopListID       string
+	TopListName     string
+	UpdateFrequency string
+}
+
+func topListSourcesFromQuery(c *gin.Context) []string {
+	requested := c.QueryArray("sources")
+	if len(requested) == 0 {
+		return core.GetTopListSourceNames()
+	}
+
+	supported := make(map[string]bool)
+	for _, source := range core.GetTopListSourceNames() {
+		supported[source] = true
+	}
+
+	seen := make(map[string]bool)
+	sources := make([]string, 0, len(requested))
+	for _, source := range requested {
+		source = strings.TrimSpace(source)
+		if source == "" || !supported[source] || seen[source] {
+			continue
+		}
+		seen[source] = true
+		sources = append(sources, source)
+	}
+	if len(sources) == 0 {
+		return core.GetTopListSourceNames()
+	}
+	return sources
+}
+
+func loadTopListPageSources(sources []string) ([]topListPageSource, string) {
+	type topListResult struct {
+		source   string
+		topLists []model.TopList
+		err      error
+	}
+
+	results := make(map[string]topListResult)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	for _, source := range sources {
+		fn := core.GetTopListsFunc(source)
+		if fn == nil {
+			continue
+		}
+		wg.Add(1)
+		go func(src string) {
+			defer wg.Done()
+			topLists, err := fn()
+			mu.Lock()
+			results[src] = topListResult{source: src, topLists: topLists, err: err}
+			mu.Unlock()
+		}(source)
+	}
+	wg.Wait()
+
+	views := make([]topListPageSource, 0, len(sources))
+	failed := make([]string, 0)
+	for _, source := range sources {
+		result, ok := results[source]
+		if !ok {
+			continue
+		}
+		if result.err != nil || len(result.topLists) == 0 {
+			failed = append(failed, core.GetSourceDescription(source))
+			continue
+		}
+		views = append(views, buildTopListPageSource(source, result.topLists))
+	}
+
+	errorMsg := ""
+	if len(views) == 0 {
+		errorMsg = "没有可展示的排行榜"
+	} else if len(failed) > 0 {
+		errorMsg = "部分来源排行榜加载失败：" + strings.Join(failed, "、")
+	}
+	return views, errorMsg
+}
+
+func buildTopListPageSource(source string, topLists []model.TopList) topListPageSource {
+	items := make([]topListPageItem, 0, len(topLists))
+	for _, topList := range topLists {
+		name := strings.TrimSpace(topList.Name)
+		if name == "" {
+			continue
+		}
+
+		items = append(items, topListPageItem{
+			ID:              strings.TrimSpace(topList.ID),
+			Name:            name,
+			Cover:           strings.TrimSpace(topList.Cover),
+			Description:     strings.TrimSpace(topList.Description),
+			UpdateFrequency: strings.TrimSpace(topList.UpdateFrequency),
+			TrackCount:      topList.TrackCount,
+			PlayCount:       formatTopListPlayCount(topList.PlayCount),
+			Source:          source,
+			URL:             topListSongsURL(source, topList),
+		})
+	}
+
+	return topListPageSource{
+		Source:   source,
+		Name:     core.GetSourceDescription(source),
+		Count:    len(items),
+		TopLists: items,
+	}
+}
+
+func topListSongsURL(source string, topList model.TopList) string {
+	values := url.Values{}
+	values.Set("source", source)
+	values.Set("toplist_id", strings.TrimSpace(topList.ID))
+	if name := strings.TrimSpace(topList.Name); name != "" {
+		values.Set("toplist_name", name)
+		values.Set("name", name)
+	}
+	if freq := strings.TrimSpace(topList.UpdateFrequency); freq != "" {
+		values.Set("update_frequency", freq)
+	}
+	if cover := strings.TrimSpace(topList.Cover); cover != "" {
+		values.Set("cover", cover)
+	}
+	if desc := strings.TrimSpace(topList.Description); desc != "" {
+		values.Set("description", desc)
+	}
+	if topList.TrackCount > 0 {
+		values.Set("track_count", strconv.Itoa(topList.TrackCount))
+	}
+	// 榜单的官方页面地址（网易云/QQ 等），由榜单数据提供，避免用歌单链接凑数。
+	if link := strings.TrimSpace(topList.Link); link != "" {
+		values.Set("link", link)
+	}
+	return RoutePrefix + "/toplist_songs?" + values.Encode()
+}
+
+func formatTopListPlayCount(count int64) string {
+	switch {
+	case count >= 100000000:
+		return fmt.Sprintf("%.1f亿", float64(count)/100000000)
+	case count >= 10000:
+		return fmt.Sprintf("%.1f万", float64(count)/10000)
+	case count > 0:
+		return strconv.FormatInt(count, 10)
+	default:
+		return ""
+	}
+}
+
+func inspectRetryAfterDelay(resp *http.Response) time.Duration {
+	if resp == nil {
+		return 0
+	}
+	value := strings.TrimSpace(resp.Header.Get("Retry-After"))
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(value); err == nil && seconds >= 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	if retryAt, err := http.ParseTime(value); err == nil {
+		delay := time.Until(retryAt)
+		if delay > 0 {
+			return delay
+		}
+	}
+	return 0
+}
+
+func inspectFailurePayload(retryable bool, reason string, retryAfter time.Duration) gin.H {
+	payload := gin.H{
+		"valid":     false,
+		"retryable": retryable,
+		"reason":    reason,
+		"status":    "invalid",
+	}
+	if retryable {
+		payload["status"] = "retryable"
+	}
+	if retryAfter > 0 {
+		payload["retry_after_ms"] = int64(retryAfter / time.Millisecond)
+	}
+	return payload
+}
+
+func defaultInspectRetryDelay(statusCode int) time.Duration {
+	switch statusCode {
+	case http.StatusTooManyRequests:
+		return 3 * time.Second
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return 5 * time.Second
+	case http.StatusRequestTimeout, http.StatusTooEarly:
+		return 2 * time.Second
+	}
+	if statusCode >= 500 {
+		return 2 * time.Second
+	}
+	return time.Second
+}
+
+func inspectHTTPFailure(statusCode int, retryAfter time.Duration) gin.H {
+	if statusCode == http.StatusNotFound || statusCode == http.StatusGone {
+		return inspectFailurePayload(false, "not_found", 0)
+	}
+	reason := "temporary_failure"
+	switch {
+	case statusCode == http.StatusTooManyRequests:
+		reason = "rate_limited"
+	case statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden:
+		reason = "access_denied"
+	case statusCode >= 500:
+		reason = "upstream_unavailable"
+	}
+	if retryAfter <= 0 {
+		retryAfter = defaultInspectRetryDelay(statusCode)
+	}
+	payload := inspectFailurePayload(true, reason, retryAfter)
+	payload["http_status"] = statusCode
+	return payload
+}
+
+func isDefinitiveInspectResolutionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"not found",
+		"does not exist",
+		"no such song",
+		"no playable",
+		"no valid download url",
+		"track unavailable",
+		"song unavailable",
+		"song info unavailable",
+		"requires cookie",
+		"vip required",
+		"不存在",
+		"无版权",
+		"没有版权",
+		"无法播放",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func inspectResolutionFailure(err error) gin.H {
+	if isDefinitiveInspectResolutionError(err) {
+		return inspectFailurePayload(false, "not_found", 0)
+	}
+	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "429") ||
+		strings.Contains(message, "too many requests") ||
+		strings.Contains(message, "rate limit") {
+		return inspectFailurePayload(true, "rate_limited", 3*time.Second)
+	}
+	if strings.Contains(message, "timeout") ||
+		strings.Contains(message, "deadline exceeded") {
+		return inspectFailurePayload(true, "upstream_timeout", 2*time.Second)
+	}
+	return inspectFailurePayload(true, "resolution_failed", 1500*time.Millisecond)
+}
+
 func RegisterMusicRoutes(api, configAPI *gin.RouterGroup) {
 
 	api.GET("/", func(c *gin.Context) {
@@ -437,6 +727,53 @@ func RegisterMusicRoutes(api, configAPI *gin.RouterGroup) {
 			CategoryName: categoryName,
 		})
 		renderIndex(c, nil, playlists, sourceName+" · "+categoryName, []string{source}, errMsg, "playlist", "", "", "", false, "", nil)
+	})
+
+	api.GET("/toplists", func(c *gin.Context) {
+		sources := topListSourcesFromQuery(c)
+		topListSources, errMsg := loadTopListPageSources(sources)
+		c.Set("TopListSources", topListSources)
+		renderIndex(c, nil, nil, "", sources, errMsg, "playlist", "", "", "", false, "", nil)
+	})
+
+	api.GET("/toplist_songs", func(c *gin.Context) {
+		source := strings.TrimSpace(c.Query("source"))
+		topListID := strings.TrimSpace(c.Query("toplist_id"))
+		topListName := strings.TrimSpace(c.Query("toplist_name"))
+		if topListName == "" {
+			topListName = topListID
+		}
+		if source == "" || topListID == "" {
+			renderIndex(c, nil, nil, "", nil, "缺少参数", "playlist", "", "", "", false, "", nil)
+			return
+		}
+
+		fn := core.GetTopListSongsFunc(source)
+		if fn == nil {
+			renderIndex(c, nil, nil, "", nil, "该源不支持排行榜", "playlist", "", "", "", false, "", nil)
+			return
+		}
+
+		songs, err := fn(topListID)
+		errMsg := ""
+		if err != nil {
+			errMsg = fmt.Sprintf("获取榜单歌曲失败: %v", err)
+		}
+
+		topListLink := core.GetOriginalLink(source, topListID, "playlist")
+		if link := strings.TrimSpace(c.Query("link")); link != "" {
+			topListLink = link
+		}
+		importCollection := importCollectionFromQuery(c, collectionContentPlaylist, source, topListID, topListLink, len(songs))
+
+		c.Set("TopListCurrent", topListCurrent{
+			Source:          source,
+			SourceName:      core.GetSourceDescription(source),
+			TopListID:       topListID,
+			TopListName:     topListName,
+			UpdateFrequency: strings.TrimSpace(c.Query("update_frequency")),
+		})
+		renderIndex(c, songs, nil, "", []string{source}, errMsg, "playlist", topListLink, "", "", false, "", importCollection)
 	})
 
 	api.GET("/search", func(c *gin.Context) {
@@ -693,49 +1030,64 @@ func RegisterMusicRoutes(api, configAPI *gin.RouterGroup) {
 
 		if src == "soda" {
 			cookie := core.CM.Get("soda")
-			sodaInst := soda.New(cookie)
+			sodaInst := core.NewSodaClient(cookie)
 			info, sErr := sodaInst.GetDownloadInfo(&model.Song{ID: id, Source: src})
 			if sErr != nil {
-				c.JSON(200, gin.H{"valid": false})
+				c.JSON(200, inspectResolutionFailure(sErr))
 				return
 			}
 			urlStr = info.URL
 		} else {
 			fn := core.GetDownloadFunc(src)
 			if fn == nil {
-				c.JSON(200, gin.H{"valid": false})
+				c.JSON(200, inspectFailurePayload(false, "source_unsupported", 0))
 				return
 			}
 			urlStr, err = fn(&model.Song{ID: id, Source: src, Extra: extra})
-			if err != nil || urlStr == "" {
-				c.JSON(200, gin.H{"valid": false})
+			if err != nil {
+				c.JSON(200, inspectResolutionFailure(err))
+				return
+			}
+			if urlStr == "" {
+				c.JSON(200, inspectFailurePayload(false, "empty_download_url", 0))
 				return
 			}
 		}
 
 		req, reqErr := core.BuildSourceRequest("GET", urlStr, src, "bytes=0-1")
 		if reqErr != nil {
-			c.JSON(200, gin.H{"valid": false})
+			c.JSON(200, inspectFailurePayload(true, "media_request_failed", time.Second))
 			return
 		}
 
-		client := &http.Client{Timeout: 5 * time.Second}
+		client := &http.Client{Timeout: 4 * time.Second}
 		resp, err := client.Do(req)
 
 		valid := false
 		var size int64 = 0
 
-		if err == nil {
-			defer resp.Body.Close()
-			if resp.StatusCode == 200 || resp.StatusCode == 206 {
-				valid = true
-				cr := resp.Header.Get("Content-Range")
-				if parts := strings.Split(cr, "/"); len(parts) == 2 {
-					size, _ = strconv.ParseInt(parts[1], 10, 64)
-				} else {
-					size = resp.ContentLength
-				}
+		if err != nil {
+			c.JSON(200, inspectFailurePayload(true, "media_unreachable", 2*time.Second))
+			return
+		}
+		if resp == nil {
+			c.JSON(200, inspectFailurePayload(true, "media_unreachable", 2*time.Second))
+			return
+		}
+		defer func() {
+			_ = resp.Body.Close()
+		}()
+		if resp.StatusCode == 200 || resp.StatusCode == 206 {
+			valid = true
+			cr := resp.Header.Get("Content-Range")
+			if parts := strings.Split(cr, "/"); len(parts) == 2 {
+				size, _ = strconv.ParseInt(parts[1], 10, 64)
+			} else {
+				size = resp.ContentLength
 			}
+		} else {
+			c.JSON(200, inspectHTTPFailure(resp.StatusCode, inspectRetryAfterDelay(resp)))
+			return
 		}
 
 		bitrate := "-"
@@ -749,6 +1101,7 @@ func RegisterMusicRoutes(api, configAPI *gin.RouterGroup) {
 
 		c.JSON(200, gin.H{
 			"valid":   valid,
+			"status":  "valid",
 			"url":     urlStr,
 			"size":    core.FormatSize(size),
 			"bitrate": bitrate,
@@ -840,6 +1193,9 @@ func RegisterMusicRoutes(api, configAPI *gin.RouterGroup) {
 				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 				return
 			}
+			if !result.Skipped {
+				indexSavedLocalMusicFile(result, settings.DownloadDir)
+			}
 
 			webdavError := ""
 			if !result.Skipped && core.WebDAVConfigured(settings) {
@@ -891,7 +1247,7 @@ func RegisterMusicRoutes(api, configAPI *gin.RouterGroup) {
 
 		if source == "soda" {
 			cookie := core.CM.Get("soda")
-			sodaInst := soda.New(cookie)
+			sodaInst := core.NewSodaClient(cookie)
 			info, err := sodaInst.GetDownloadInfo(tempSong)
 			if err != nil {
 				c.String(502, "Soda info error")

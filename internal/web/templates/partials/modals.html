@@ -30,17 +30,95 @@
                     </label>
                     <p class="setting-hint">关闭后，播放音乐时不显示底部悬浮歌词。</p>
                 </div>
+                <div class="cookie-item setting-item lyric-appearance-settings">
+                    <div class="settings-section-heading">
+                        <span class="settings-section-icon"><i class="fa-solid fa-font"></i></span>
+                        <span>
+                            <strong>歌词字体</strong>
+                            <small>同时应用到播放器歌词和底部悬浮歌词</small>
+                        </span>
+                    </div>
+                    <div class="lyric-appearance-controls">
+                        <label for="setting-lyric-font-family">
+                            字体
+                            <select id="setting-lyric-font-family">
+                                <option value="system">系统默认</option>
+                                <option value="sans">现代黑体</option>
+                                <option value="serif">宋体 / 衬线</option>
+                                <option value="yahei">微软雅黑</option>
+                                <option value="pingfang">苹方</option>
+                                <option value="source-han">思源黑体 / Noto Sans CJK</option>
+                                <option value="lxgw">霞鹜文楷 / 楷体</option>
+                            </select>
+                        </label>
+                        <label for="setting-lyric-font-size">
+                            字号 <output id="setting-lyric-font-size-value" for="setting-lyric-font-size">24 px</output>
+                            <input type="range" id="setting-lyric-font-size" min="14" max="48" step="1" value="24">
+                        </label>
+                    </div>
+                    <div id="setting-lyric-font-preview" class="lyric-font-preview" aria-live="polite">
+                        示例歌词 · 让每一句都清晰可见
+                    </div>
+                </div>
+                <div class="cookie-item setting-item shortcut-settings">
+                    <div class="settings-section-heading">
+                        <span class="settings-section-icon"><i class="fa-solid fa-keyboard"></i></span>
+                        <span>
+                            <strong>应用内全局快捷键</strong>
+                            <small>焦点不在输入框且未打开弹窗时生效</small>
+                        </span>
+                    </div>
+                    <div class="shortcut-settings-list">
+                        <div class="shortcut-setting-row">
+                            <label for="setting-shortcut-play-pause">播放 / 暂停</label>
+                            <div class="shortcut-capture-control">
+                                <input type="text" id="setting-shortcut-play-pause" data-shortcut-input readonly autocomplete="off" placeholder="未设置">
+                                <button type="button" class="shortcut-clear-btn" data-shortcut-clear="setting-shortcut-play-pause" title="清除播放 / 暂停快捷键"><i class="fa-solid fa-xmark"></i></button>
+                            </div>
+                        </div>
+                        <div class="shortcut-setting-row">
+                            <label for="setting-shortcut-previous">上一首</label>
+                            <div class="shortcut-capture-control">
+                                <input type="text" id="setting-shortcut-previous" data-shortcut-input readonly autocomplete="off" placeholder="未设置">
+                                <button type="button" class="shortcut-clear-btn" data-shortcut-clear="setting-shortcut-previous" title="清除上一首快捷键"><i class="fa-solid fa-xmark"></i></button>
+                            </div>
+                        </div>
+                        <div class="shortcut-setting-row">
+                            <label for="setting-shortcut-next">下一首</label>
+                            <div class="shortcut-capture-control">
+                                <input type="text" id="setting-shortcut-next" data-shortcut-input readonly autocomplete="off" placeholder="未设置">
+                                <button type="button" class="shortcut-clear-btn" data-shortcut-clear="setting-shortcut-next" title="清除下一首快捷键"><i class="fa-solid fa-xmark"></i></button>
+                            </div>
+                        </div>
+                        <div class="shortcut-setting-row">
+                            <label for="setting-shortcut-seek-back">后退 10 秒</label>
+                            <div class="shortcut-capture-control">
+                                <input type="text" id="setting-shortcut-seek-back" data-shortcut-input readonly autocomplete="off" placeholder="未设置">
+                                <button type="button" class="shortcut-clear-btn" data-shortcut-clear="setting-shortcut-seek-back" title="清除后退快捷键"><i class="fa-solid fa-xmark"></i></button>
+                            </div>
+                        </div>
+                        <div class="shortcut-setting-row">
+                            <label for="setting-shortcut-seek-forward">前进 10 秒</label>
+                            <div class="shortcut-capture-control">
+                                <input type="text" id="setting-shortcut-seek-forward" data-shortcut-input readonly autocomplete="off" placeholder="未设置">
+                                <button type="button" class="shortcut-clear-btn" data-shortcut-clear="setting-shortcut-seek-forward" title="清除前进快捷键"><i class="fa-solid fa-xmark"></i></button>
+                            </div>
+                        </div>
+                    </div>
+                    <p id="setting-shortcut-status" class="setting-hint shortcut-settings-hint" aria-live="polite">点击输入框后按下组合键；Backspace / Delete 清空，Esc 取消。PageUp / PageDown 保留给列表翻页。</p>
+                </div>
                 <div class="cookie-item">
                     <label for="setting-web-page-size">Web 每页条数</label>
                     <select id="setting-web-page-size" aria-label="Web 每页条数">
                         <option value="30">30 条/页</option>
+                        <option value="50" selected>50 条/页（默认）</option>
                         <option value="100">100 条/页</option>
-                        <option value="200" selected>200 条/页（默认）</option>
+                        <option value="200">200 条/页</option>
                         <option value="300">300 条/页</option>
                         <option value="400">400 条/页</option>
                         <option value="500">500 条/页</option>
                     </select>
-                    <p class="setting-hint" style="margin-left: 0;">搜索结果列表每页显示的歌曲数量，默认 200。</p>
+                    <p class="setting-hint" style="margin-left: 0;">搜索结果列表每页显示的歌曲数量，默认 50。</p>
                 </div>
                 <div class="cookie-item">
                     <label for="setting-cli-page-size">CLI 每页条数</label>
@@ -153,6 +231,42 @@
                     </label>
                     <p class="setting-hint">开启后，在线歌曲开始播放时会后台保存到本地下载目录；默认关闭，避免持续占用储存空间。</p>
                 </div>
+                <div class="cookie-item setting-item search-filter-settings">
+                    <div class="settings-section-heading">
+                        <span class="settings-section-icon"><i class="fa-solid fa-filter"></i></span>
+                        <span>
+                            <strong>搜索结果清理</strong>
+                            <small>在分页和批量操作之前过滤不需要的版本</small>
+                        </span>
+                    </div>
+                    <label class="setting-toggle" for="setting-filter-version-keywords">
+                        <input type="checkbox" id="setting-filter-version-keywords">
+                        <span class="setting-switch" aria-hidden="true"></span>
+                        <span class="setting-toggle-text">按歌名关键词过滤版本</span>
+                    </label>
+                    <p class="setting-hint">匹配歌名中包含关键词的歌曲，不区分英文大小写。</p>
+                </div>
+                <div class="cookie-item">
+                    <label for="setting-version-filter-keywords">版本关键词</label>
+                    <input type="text" id="setting-version-filter-keywords" value="Live, Remix, Demo" maxlength="240" aria-describedby="setting-version-filter-keywords-hint" placeholder="Live, Remix, Demo">
+                    <p id="setting-version-filter-keywords-hint" class="setting-hint" style="margin-left: 0;">可用中文逗号、英文逗号、分号或换行分隔，例如：Live，Remix；Demo。</p>
+                </div>
+                <div class="cookie-item setting-item">
+                    <label class="setting-toggle" for="setting-filter-short-tracks">
+                        <input type="checkbox" id="setting-filter-short-tracks">
+                        <span class="setting-switch" aria-hidden="true"></span>
+                        <span class="setting-toggle-text">过滤时长低于 60 秒的试听版</span>
+                    </label>
+                    <p class="setting-hint">时长未知（0 秒）的歌曲会保留，避免误删正常条目。</p>
+                </div>
+                <div class="cookie-item setting-item">
+                    <label class="setting-toggle" for="setting-normalize-chinese-variants">
+                        <input type="checkbox" id="setting-normalize-chinese-variants">
+                        <span class="setting-switch" aria-hidden="true"></span>
+                        <span class="setting-toggle-text">下载文件名统一为简体中文</span>
+                    </label>
+                    <p class="setting-hint">会清理歌名、歌手和专辑中的零宽字符，并把繁体转为简体。下载去重始终做该归一化，避免“久石让 / 久石讓”重复下载。</p>
+                </div>
                 <button type="button" class="cookie-item setting-item setting-link-row" onclick="openDownloadRecordsModal()">
                     <span class="setting-link-icon"><i class="fa-solid fa-clock-rotate-left"></i></span>
                     <span class="setting-link-body">
@@ -194,12 +308,15 @@
 
             <section id="settings-panel-cookies" class="settings-tab-panel" role="tabpanel" aria-labelledby="settings-tab-cookies" data-settings-panel="cookies" hidden>
                 <p class="settings-panel-hint">Cookie 只保存在当前服务器的配置库中。平台登录后通常可获得更完整的音质和歌单信息。</p>
+                <div class="cookie-capture-guide">
+                    <strong>手动获取 Cookie：</strong>先在新标签页登录下方平台，按 <kbd>F12</kbd> 打开开发者工具并切到“网络”，刷新页面后选择同域请求，在“请求标头”中复制完整的 <code>Cookie</code> 值。只粘贴冒号后的值，不要带 <code>Cookie:</code> 前缀。
+                </div>
                 <div class="cookie-list">
                     {{ range $source := .AllSources }}
                     <div class="cookie-item">
                         <label>{{ $source }}</label>
                         <div class="cookie-input-row">
-                            <input type="text" id="cookie-{{$source}}" placeholder="在此粘贴 Cookie...">
+                            <input type="text" id="cookie-{{$source}}" placeholder="在此粘贴 Cookie..." aria-describedby="cookie-hint-{{$source}}">
                             {{ if eq $source "qq" }}
                             {{ if index $.QRLoginSupported "qq" }}
                             <button type="button" class="cookie-qr-btn" onclick="startQRLogin('qq')"><i class="fa-brands fa-qq"></i> QQ扫码</button>
@@ -213,8 +330,37 @@
                             {{ end }}
                             {{ end }}
                         </div>
+                        {{ with index $.CookieCaptureHints $source }}
+                        <p id="cookie-hint-{{$source}}" class="setting-hint cookie-source-hint">
+                            手动获取：登录 <a href="{{.LoginURL}}" target="_blank" rel="noopener noreferrer">{{ index $.SourceDescriptions $source }}</a>，在开发者工具“网络”面板筛选 <code>{{.Domain}}</code> 的请求并复制完整 Cookie。{{.Hint}}
+                        </p>
+                        {{ else }}
+                        <p id="cookie-hint-{{$source}}" class="setting-hint cookie-source-hint">本地音乐直接从下载目录读取文件，不需要 Cookie。</p>
+                        {{ end }}
                     </div>
                     {{ end }}
+                </div>
+                <div class="settings-panel-subtitle">汽水音乐整曲取流（会员音质）</div>
+                <p class="settings-panel-hint">
+                    汽水会员曲目的整曲流走 App 端点，需要 Cookie + 应用级签名头（x-helios / x-medusa）。
+                    默认使用本机签名器：随用随起调用汽水官方客户端的 bdms.node，不需要任何常驻服务（装过客户端即自动可用）。
+                    下面的地址留空即用本机签名器；填了地址则改用远程签名服务（参考 sodam 的 <code>/sign</code>）；
+                    两者都不可用时才走公开接口（免费整曲，会员曲目为试听片段）。
+                </p>
+                <p class="setting-hint" id="setting-soda-local-signer-state" style="margin-left: 0;"></p>
+                <div class="cookie-item">
+                    <label for="setting-soda-client-dir">汽水音乐安装目录（可选）</label>
+                    <input type="text" id="setting-soda-client-dir" placeholder="例如 C:\Users\你\AppData\Local\Programs\Soda Music\3.1.0" autocomplete="off" spellcheck="false">
+                    <p class="setting-hint" style="margin-left: 0;">填写包含 <code>SodaMusic.exe</code> 和 <code>resources\app.asar.unpacked\bdms.node</code> 的版本目录；留空自动探测默认位置。环境变量 <code>QISHUI_CLIENT_DIR</code> 优先于此处设置。</p>
+                </div>
+                <div class="cookie-item">
+                    <label for="setting-soda-signer-url">远程签名服务地址（可选）</label>
+                    <input type="url" id="setting-soda-signer-url" placeholder="留空 = 使用本机签名器" autocomplete="off">
+                    <p class="setting-hint" style="margin-left: 0;">远程签名器会看到本次请求的完整请求头（含 Cookie），请只指向自己信任的实例。</p>
+                </div>
+                <div class="cookie-item">
+                    <label for="setting-soda-signer-token">签名服务 Token</label>
+                    <input type="password" id="setting-soda-signer-token" placeholder="留空则保留已保存的 Token" autocomplete="new-password">
                 </div>
             </section>
 
@@ -321,12 +467,34 @@
     <div class="modal utility-modal download-records-modal">
         <div class="modal-header">
             <div>
-                <h3><i class="fa-solid fa-clock-rotate-left"></i> 下载记录</h3>
-                <p class="download-records-subtitle">最近的下载、跳过和失败记录</p>
+                <h3><i class="fa-solid fa-clock-rotate-left"></i> 下载管理</h3>
+                <p class="download-records-subtitle">任务自动保存，重启后继续；中断歌曲会重新下载。</p>
             </div>
             <div class="modal-close" onclick="closeDownloadRecordsModal()"><i class="fa-solid fa-xmark"></i></div>
         </div>
         <div class="modal-body">
+            <div class="queue-tabs" role="tablist" aria-label="下载管理">
+                <button type="button" role="tab" data-download-tab="queue" aria-selected="true" onclick="switchDownloadManagerTab('queue')">下载队列</button>
+                <button type="button" role="tab" data-download-tab="history" aria-selected="false" onclick="switchDownloadManagerTab('history')">历史记录</button>
+            </div>
+            <section id="download-queue-panel">
+                <div id="download-queue-summary" aria-live="polite"></div>
+                <div class="utility-modal-toolbar queue-toolbar">
+                    <div class="queue-filter">
+                        <label for="download-queue-filter">显示任务</label>
+                        <select id="download-queue-filter" onchange="downloadQueueFilter=this.value;loadDownloadQueue(1)"><option value="">全部</option><option value="active">等待与下载中</option><option value="success">成功</option><option value="skipped">跳过</option><option value="failed">失败</option><option value="canceled">已取消</option></select>
+                    </div>
+                    <div class="utility-modal-actions queue-toolbar-actions">
+                        <button type="button" class="btn-pill queue-refresh" onclick="loadDownloadQueue()"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i> 刷新</button>
+                        <button type="button" class="btn-pill btn-pill-danger" onclick="clearDownloadQueue()"><i class="fa-solid fa-trash-can" aria-hidden="true"></i> 清空任务</button>
+                    </div>
+                </div>
+                <p class="queue-note">关闭此面板不会停止下载。重启应用后自动恢复等待任务；此处显示任务状态和总体进度。</p>
+                <p id="download-queue-error" role="status"></p>
+                <div id="download-queue-list" class="utility-modal-list"></div>
+                <nav id="download-queue-pagination" class="utility-modal-pagination" aria-label="下载队列分页"></nav>
+            </section>
+            <section id="download-history-panel" hidden>
             <div class="utility-modal-toolbar download-records-toolbar">
                 <span id="download-records-count" class="utility-modal-count download-records-count">加载中...</span>
                 <div class="utility-modal-actions download-records-actions">
@@ -340,6 +508,7 @@
             </div>
             <div id="download-records-list" class="utility-modal-list download-records-list"></div>
             <nav id="download-records-pagination" class="utility-modal-pagination" aria-label="下载记录分页"></nav>
+            </section>
         </div>
     </div>
 </div>

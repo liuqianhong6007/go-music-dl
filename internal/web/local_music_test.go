@@ -961,8 +961,8 @@ func TestAutoCacheClientWaitsForConfirmedLocalMatch(t *testing.T) {
 		"localMusicMatchCache[audio.custom_id]",
 		`"X-Requested-With": "XMLHttpRequest"`,
 		"scheduleAutoCacheMatch(audio, key)",
-		"custom_id: playbackSong.id",
-		"original_id: ds.id",
+		"custom_id:playback.id",
+		"original_id:song.id",
 		"getPlaybackCardID(newAudio)",
 	} {
 		if !strings.Contains(js, want) {
@@ -1035,7 +1035,7 @@ func TestLocalMusicDuplicateEndpointPaginatesGroups(t *testing.T) {
 	}
 }
 
-func TestIndexAutoCachedLocalMusicUpsertsOnlySavedFile(t *testing.T) {
+func TestIndexSavedLocalMusicFileUpsertsOnlySavedFile(t *testing.T) {
 	initCollectionDBForTest(t)
 
 	downloadDir := t.TempDir()
@@ -1048,7 +1048,7 @@ func TestIndexAutoCachedLocalMusicUpsertsOnlySavedFile(t *testing.T) {
 		t.Fatalf("write cached audio: %v", err)
 	}
 
-	indexAutoCachedLocalMusic(&core.DownloadedSong{SavedPath: savedPath}, "")
+	indexSavedLocalMusicFile(&core.DownloadedSong{SavedPath: savedPath}, "")
 
 	var row LocalMusicIndex
 	if err := db.Where("rel_path = ?", "Artist/Cached Song.mp3").First(&row).Error; err != nil {
@@ -1363,5 +1363,57 @@ func TestPlayModeButtonSitsAboveFixedPlayerCover(t *testing.T) {
 		if !strings.Contains(css, want) {
 			t.Fatalf("style.css missing %q", want)
 		}
+	}
+}
+
+func TestLocalMusicEndpointReadsEntireLibraryBeyondOffset1000(t *testing.T) {
+	initCollectionDBForTest(t)
+	downloadDir := t.TempDir()
+	withLocalMusicDownloadDir(t, downloadDir)
+	if err := db.AutoMigrate(&LocalMusicIndex{}); err != nil {
+		t.Fatal(err)
+	}
+	rows := make([]LocalMusicIndex, 0, 2880)
+	for i := 0; i < 2880; i++ {
+		name := fmt.Sprintf("Track-%04d.mp3", i)
+		if err := os.WriteFile(filepath.Join(downloadDir, name), []byte("audio"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		rows = append(rows, LocalMusicIndex{ID: encodeLocalMusicID(name), RelPath: name, Name: name, Ext: "mp3", ModTime: time.Unix(int64(i), 0)})
+	}
+	if err := db.CreateInBatches(rows, 100).Error; err != nil {
+		t.Fatal(err)
+	}
+	// Exercise the indexed HTTP path without launching metadata scans of 2880 files.
+	storeLocalMusicScanSnapshot(localMusicScanSnapshot{Dir: downloadDir, Exists: true, ScannedAt: time.Now()})
+	router := newLocalMusicTestRouter()
+	seen := map[string]bool{}
+	for offset := 0; offset < 2880; offset += 500 {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, fmt.Sprintf("%s/local_music?offset=%d&limit=500", RoutePrefix, offset), nil))
+		var response struct {
+			Tracks  []localMusicTrack `json:"tracks"`
+			Offset  int               `json:"offset"`
+			Total   int               `json:"total"`
+			HasMore bool              `json:"has_more"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != 200 || response.Offset != offset || response.Total != 2880 {
+			t.Fatalf("offset=%d: %s", offset, rec.Body.String())
+		}
+		for _, track := range response.Tracks {
+			if seen[track.ID] {
+				t.Fatalf("duplicate track %s at offset %d", track.ID, offset)
+			}
+			seen[track.ID] = true
+		}
+		if response.HasMore != (offset+len(response.Tracks) < 2880) {
+			t.Fatalf("incorrect has_more at %d", offset)
+		}
+	}
+	if len(seen) != 2880 {
+		t.Fatalf("loaded %d of 2880 tracks", len(seen))
 	}
 }

@@ -60,6 +60,8 @@ func TestAppJSAutoSwitchInvalidSources(t *testing.T) {
 		"await batchSwitchSource({",
 		`document.querySelector(".tag-fail")`,
 		`card.dataset.inspectPending = "1"`,
+		`data.retryable === true || data.status === "retryable"`,
+		`prepareInspectRetry(card, retryDelay)`,
 		"async function batchSwitchSource(options = {})",
 		"!options.skipConfirm &&",
 		"!confirm(",
@@ -70,6 +72,12 @@ func TestAppJSAutoSwitchInvalidSources(t *testing.T) {
 		if !strings.Contains(js, want) {
 			t.Fatalf("app.js missing %q", want)
 		}
+	}
+	if strings.Contains(js, "hasPendingSongInspections") {
+		t.Fatal("auto source switching must not wait for the entire inspection queue")
+	}
+	if !strings.Contains(js, "if (autoSwitchInvalidTimer) return;") {
+		t.Fatal("auto source switching should be throttled instead of restarting its delay")
 	}
 }
 

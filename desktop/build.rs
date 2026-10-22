@@ -18,4 +18,14 @@ fn main() {
             std::process::exit(1);
         }
     }
+
+    #[cfg(target_os = "macos")]
+    {
+        println!("cargo:rerun-if-changed=src/native_macos.m");
+        cc::Build::new()
+            .file("src/native_macos.m")
+            .flag("-fobjc-arc")
+            .compile("music_dl_native_macos");
+        println!("cargo:rustc-link-lib=framework=Cocoa");
+    }
 }

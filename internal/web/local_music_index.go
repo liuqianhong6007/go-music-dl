@@ -64,6 +64,81 @@ func localMusicIndexExtra(row *LocalMusicIndex) map[string]string {
 	return extra
 }
 
+func localMusicTrackFromIndexRow(rootAbs string, row *LocalMusicIndex) *localMusicTrack {
+	if row == nil || strings.TrimSpace(row.RelPath) == "" {
+		return nil
+	}
+
+	cover := row.Cover
+	if cover == "" && row.HasCover {
+		cover = RoutePrefix + "/local_music/cover?id=" + url.QueryEscape(row.ID)
+	}
+	return &localMusicTrack{
+		ID:         row.ID,
+		Source:     localMusicSource,
+		Name:       row.Name,
+		Artist:     row.Artist,
+		Album:      row.Album,
+		Cover:      cover,
+		Duration:   row.Duration,
+		Filename:   filepath.Base(row.RelPath),
+		RelPath:    row.RelPath,
+		Ext:        row.Ext,
+		Size:       row.Size,
+		SizeText:   formatSizeForIndex(row.Size),
+		ModifiedAt: row.ModTime,
+		Extra:      localMusicIndexExtra(row),
+		absPath:    filepath.Join(rootAbs, filepath.FromSlash(row.RelPath)),
+		modTime:    row.ModTime,
+	}
+}
+
+// hydrateLocalMusicMetaCacheFromIndex turns persisted index rows into a warm
+// metadata cache. A filesystem refresh still stats files to detect additions,
+// deletions and edits, but unchanged files no longer need tag parsing or a
+// separate ffprobe process.
+func hydrateLocalMusicMetaCacheFromIndex(rootAbs string) {
+	if db == nil || strings.TrimSpace(rootAbs) == "" {
+		return
+	}
+	rootAbs = filepath.Clean(rootAbs)
+	localMusicMetaCacheMu.RLock()
+	alreadyHydrated := localMusicMetaCacheRoot == rootAbs
+	localMusicMetaCacheMu.RUnlock()
+	if alreadyHydrated {
+		return
+	}
+	markHydrated := func() {
+		localMusicMetaCacheMu.Lock()
+		localMusicMetaCacheRoot = rootAbs
+		localMusicMetaCacheMu.Unlock()
+	}
+
+	const batchSize = 500
+	lastID := ""
+	for {
+		var rows []LocalMusicIndex
+		query := db.Order("id ASC").Limit(batchSize)
+		if lastID != "" {
+			query = query.Where("id > ?", lastID)
+		}
+		if err := query.Find(&rows).Error; err != nil {
+			return
+		}
+		for i := range rows {
+			track := localMusicTrackFromIndexRow(rootAbs, &rows[i])
+			if track != nil {
+				cacheLocalMusicTrack(rootAbs, track)
+			}
+		}
+		if len(rows) < batchSize {
+			markHydrated()
+			return
+		}
+		lastID = rows[len(rows)-1].ID
+	}
+}
+
 func localMusicTrackToIndexRow(track *localMusicTrack, scannedAt time.Time) LocalMusicIndex {
 	hasCover := strings.TrimSpace(track.Cover) != ""
 	hasLyric := false
@@ -117,7 +192,8 @@ func syncLocalMusicIndex() error {
 	return nil
 }
 
-// syncLocalMusicIndexAsync 在后台跑一次全量同步，不阻塞调用方（启动时用）。
+// syncLocalMusicIndexAsync runs an explicit background rebuild. Normal startup
+// uses the persisted index and defers scanning until local music is opened.
 func syncLocalMusicIndexAsync() {
 	go func() {
 		_ = syncLocalMusicIndex()
@@ -218,30 +294,17 @@ func loadTracksFromIndex(offset int, limit int) ([]*localMusicTrack, int, bool) 
 	for i := range rows {
 		row := &rows[i]
 		// 快速校验文件是否还在磁盘上
-		absPath := filepath.Join(rootAbs, filepath.FromSlash(row.RelPath))
+		track := localMusicTrackFromIndexRow(rootAbs, row)
+		if track == nil {
+			missingIDs = append(missingIDs, row.ID)
+			continue
+		}
+		absPath := track.absPath
 		if info, statErr := os.Stat(absPath); statErr != nil || info.IsDir() {
 			missingIDs = append(missingIDs, row.ID)
 			continue
 		}
-		cover := row.Cover
-		if cover == "" && row.HasCover {
-			cover = RoutePrefix + "/local_music/cover?id=" + url.QueryEscape(row.ID)
-		}
-		tracks = append(tracks, &localMusicTrack{
-			ID:       row.ID,
-			Source:   localMusicSource,
-			Name:     row.Name,
-			Artist:   row.Artist,
-			Album:    row.Album,
-			Cover:    cover,
-			Duration: row.Duration,
-			Filename: filepath.Base(row.RelPath),
-			RelPath:  row.RelPath,
-			Ext:      row.Ext,
-			Size:     row.Size,
-			SizeText: formatSizeForIndex(row.Size),
-			Extra:    localMusicIndexExtra(row),
-		})
+		tracks = append(tracks, track)
 	}
 	if len(missingIDs) > 0 {
 		if err := db.Where("id IN ?", missingIDs).Delete(&LocalMusicIndex{}).Error; err != nil {

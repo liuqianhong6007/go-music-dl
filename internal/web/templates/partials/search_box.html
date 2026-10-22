@@ -27,10 +27,10 @@
 
         <div class="input-group">
             <input type="text" id="search-keyword" name="q" value="{{.Keyword}}" placeholder="{{.SearchPlaceholder}}" required autocomplete="off">
-            <button type="submit" class="search-btn"><i class="fa-solid fa-magnifying-glass"></i></button>
+            <button type="submit" class="search-btn" title="搜索" aria-label="搜索"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i></button>
         </div>
 
-        <div style="display: flex; gap: 15px; justify-content: center; margin-bottom: 20px; flex-wrap: wrap;">
+        <div class="quick-actions" style="display: flex; gap: 15px; justify-content: center; margin-bottom: 20px; flex-wrap: wrap;">
             <button type="button" class="btn-pill btn-pill-primary" onclick="goToRecommend()"
                 style="background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%); border: none; box-shadow: 0 4px 15px rgba(255, 154, 158, 0.4); justify-content:center;">
                 <i class="fa-solid fa-fire"></i> 每日推荐歌单
@@ -43,6 +43,9 @@
             </button>
             <button type="button" class="btn-pill btn-pill-category" onclick="goToPlaylistCategories()">
                 <i class="fa-solid fa-table-cells-large"></i> 歌单分类
+            </button>
+            <button type="button" class="btn-pill btn-pill-rank" onclick="goToTopLists()">
+                <i class="fa-solid fa-ranking-star"></i> 排行榜
             </button>
             <button type="button" class="btn-pill btn-pill-mine" onclick="goToUserPlaylists()">
                 <i class="fa-solid fa-heart"></i> 我的歌单
@@ -69,11 +72,12 @@
 
             <div class="source-grid" id="source-grid">
                 {{ range $source := .AllSources }}
-                <label>
+                <label class="source-option">
                     <input type="checkbox" name="sources" value="{{ $source }}" class="source-checkbox"
                         data-playlist-supported="{{ index $.PlaylistSupported $source }}"
                         data-album-supported="{{ index $.AlbumSupported $source }}"
                         data-category-supported="{{ index $.CategorySupported $source }}"
+                        data-toplist-supported="{{ index $.TopListSupported $source }}"
                         data-user-playlist-supported="{{ index $.UserPlaylistSupported $source }}"
                         {{ if $.Selected }}
                             {{ range $.Selected }}{{ if eq . $source }}checked{{ end }}{{ end }}
