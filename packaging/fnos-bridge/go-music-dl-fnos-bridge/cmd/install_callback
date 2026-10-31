@@ -1,0 +1,34 @@
+#!/bin/bash
+
+set -u
+
+CMD_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck disable=SC1091
+. "${CMD_DIR}/common"
+
+mkdir -p "${TRIM_PKGVAR}"
+
+# Migrate early command-line/systemd deployments to the app-managed lifecycle.
+if systemctl is-active --quiet music-dl-fnos-bridge.service 2>/dev/null; then
+    systemctl disable --now music-dl-fnos-bridge.service >> "${LOG_FILE}" 2>&1 || true
+    log_msg "Disabled legacy music-dl-fnos-bridge.service; FPK now owns the lifecycle"
+fi
+if systemctl is-active --quiet music-dl-source-api.service 2>/dev/null; then
+    systemctl disable --now music-dl-source-api.service >> "${LOG_FILE}" 2>&1 || true
+    log_msg "Disabled legacy music-dl-source-api.service; go-music-dl FPK now owns source API"
+fi
+
+sources="${wizard_sources:-netease,qq,kugou,kuwo,migu}"
+
+umask 077
+{
+    printf 'FNMUSIC_SOURCES=%q\n' "${sources}"
+    printf 'FNMUSIC_MAX_ONLINE=%q\n' "30"
+    printf 'FNMUSIC_SEARCH_TIMEOUT=%q\n' "12s"
+    printf 'FNMUSIC_SOCKET_MODE=%q\n' "0666"
+    printf 'FNMUSIC_SOURCE_SOCKET=%q\n' "/var/apps/go-music-dl/target/go-music-dl.sock"
+    printf 'FNMUSIC_SOURCE_TOKEN=%q\n' "/var/apps/go-music-dl/target/go-music-dl.sock.source-token"
+} > "${PROFILE_FILE}"
+chmod 0600 "${PROFILE_FILE}"
+log_msg "Bridge package installed; profile=${PROFILE_FILE}"
+exit 0

@@ -67,3 +67,23 @@ music-dl web --no-browser \
 `X-Trim-*` 请求头只有在请求确实来自统一网关时才可信。应用按连接类型判断：
 仅 Unix Socket 连接上的身份头会被接受，TCP 端口上的同名头一律忽略，
 所以不能在局域网里伪造 NAS 用户身份。
+
+## 飞牛音乐原生界面桥接
+
+`music-dl web --unix-socket` 会在 Web 自己的 Unix Socket 上自动挂载受令牌保护
+的 source API。独立的 `fnos-bridge` FPK 接管飞牛音乐 Socket，并把 source API
+的搜索、播放和下载结果转换成飞牛协议；桥接的依赖图中不包含 `core`、
+`internal/sourceapi` 或 `music-lib`。
+
+正式安装方式是应用中心：
+
+1. 安装并启动 go-music-dl 1.1.4+。
+2. 在 go-music-dl Web 设置中配置音源 Cookie 和下载目录。
+3. 安装并启动 `go-music-dl-fnos-bridge` FPK。
+
+桥接支持在线搜索、播放、Range/HEAD、元数据、歌词、封面、下载任务、设备文件
+交付、官方曲库绑定和按用户恢复收藏。官方本地歌曲仍走原始透传。不要与其它
+接管 `/var/run/trim_music.socket` 的扩展同时运行。
+
+桥接命令行、FPK 构建、数据位置和源码边界只在
+[`packaging/fnos-bridge/README.md`](../fnos-bridge/README.md) 维护。

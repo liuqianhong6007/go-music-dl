@@ -19,6 +19,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/guohuiyuan/go-music-dl/core"
+	"github.com/guohuiyuan/go-music-dl/internal/sourceapi"
 	"github.com/guohuiyuan/music-lib/model"
 )
 
@@ -582,12 +583,29 @@ func StartWithOptions(port string, opts StartOptions) {
 		return
 	}
 
-	r := newEngineWithQueue(opts, core.GetWebAuthSettings, queue)
+	socketPath := strings.TrimSpace(opts.ListenUnixSocket)
+	var sourceHandler http.Handler
+	if socketPath != "" {
+		sourceServer, err := sourceapi.New(sourceapi.Config{
+			TokenFile:     socketPath + ".source-token",
+			SearchTimeout: 12 * time.Second,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Initialize source API: %v\n", err)
+			return
+		}
+		if err := sourceServer.PrepareDownloads(queue); err != nil {
+			fmt.Fprintf(os.Stderr, "Initialize source API downloads: %v\n", err)
+			return
+		}
+		sourceHandler = sourceServer.Handler()
+	}
+
+	r := newEngineWithQueueAndSource(opts, core.GetWebAuthSettings, queue, sourceHandler)
 
 	server := &http.Server{Handler: r, ConnContext: withGatewayConn}
 	listeners := make([]net.Listener, 0, 2)
 
-	socketPath := strings.TrimSpace(opts.ListenUnixSocket)
 	if socketPath != "" {
 		// 上次异常退出可能残留 socket 文件，先清掉避免 listen 报 address already in use。
 		if err := os.Remove(socketPath); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -675,6 +693,10 @@ func newEngineWithProvider(opts StartOptions, provider authSettingsProvider) *gi
 }
 
 func newEngineWithQueue(opts StartOptions, provider authSettingsProvider, queue *core.DownloadQueue) *gin.Engine {
+	return newEngineWithQueueAndSource(opts, provider, queue, nil)
+}
+
+func newEngineWithQueueAndSource(opts StartOptions, provider authSettingsProvider, queue *core.DownloadQueue, sourceHandler http.Handler) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 	r.Use(corsMiddleware(), gzipMiddleware())
@@ -782,6 +804,17 @@ func newEngineWithQueue(opts StartOptions, provider authSettingsProvider, queue 
 	RegisterUpdateRoutes(routes.protected)
 	if queue != nil {
 		RegisterDownloadQueueRoutes(routes.protected, queue)
+	}
+	if sourceHandler != nil {
+		prefix := "/internal/source-api"
+		handler := http.StripPrefix(prefix, sourceHandler)
+		r.Any(prefix+"/*path", func(c *gin.Context) {
+			if !requestFromUnixConn(c.Request) {
+				c.Status(http.StatusNotFound)
+				return
+			}
+			handler.ServeHTTP(c.Writer, c.Request)
+		})
 	}
 
 	return r

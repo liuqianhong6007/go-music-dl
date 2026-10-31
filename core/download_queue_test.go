@@ -33,6 +33,14 @@ func TestDownloadQueueDurableBatchAndActiveDedup(t *testing.T) {
 	if n, err := q.Enqueue("batch-1", queueInputs(550)); err != nil || n != 550 {
 		t.Fatalf("enqueue %d: %v", n, err)
 	}
+	task, err := q.TaskByRequestKey("batch-1:0")
+	if err != nil || task.Name != "Song 0" {
+		t.Fatalf("task by request key = %#v, %v", task, err)
+	}
+	active, err := q.ActiveTaskBySong("kuwo", "0", "/downloads")
+	if err != nil || active.ID != task.ID {
+		t.Fatalf("active task by song = %#v, %v", active, err)
+	}
 	if n, err := q.Enqueue("batch-1", queueInputs(550)); err != nil || n != 0 {
 		t.Fatalf("idempotent enqueue %d: %v", n, err)
 	}
@@ -42,7 +50,7 @@ func TestDownloadQueueDurableBatchAndActiveDedup(t *testing.T) {
 	if err := CloseConfigDB(); err != nil {
 		t.Fatal(err)
 	}
-	q, err := OpenDownloadQueue()
+	q, err = OpenDownloadQueue()
 	if err != nil {
 		t.Fatal(err)
 	}

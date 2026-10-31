@@ -1,0 +1,94 @@
+#!/bin/bash
+
+# Shared lifecycle helpers. This package intentionally runs the bridge directly
+# under fnOS' root lifecycle instead of installing a separate systemd unit.
+
+PROFILE_FILE="${TRIM_PKGVAR}/bridge.env"
+LOG_FILE="${TRIM_PKGVAR}/bridge.log"
+PID_FILE="${TRIM_PKGVAR}/bridge.pid"
+TARGET_SOCKET="/var/run/trim_music.socket"
+
+log_msg() {
+    mkdir -p "${TRIM_PKGVAR}"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "${LOG_FILE}"
+}
+
+read_pid() {
+    if [ -r "${PID_FILE}" ]; then
+        head -n 1 "${PID_FILE}" | tr -d '[:space:]'
+    fi
+}
+
+check_process() {
+    local pid="$1"
+    [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null
+}
+
+status_app() {
+    local pid
+    pid="$(read_pid)"
+    if check_process "${pid}"; then
+        return 0
+    fi
+    rm -f "${PID_FILE}"
+    return 1
+}
+
+load_profile() {
+    FNMUSIC_SOURCES="netease,qq,kugou,kuwo,migu"
+    FNMUSIC_MAX_ONLINE="30"
+    FNMUSIC_SEARCH_TIMEOUT="12s"
+    FNMUSIC_SOCKET_MODE="0666"
+    FNMUSIC_SOURCE_SOCKET="/var/apps/go-music-dl/target/go-music-dl.sock"
+
+    [ -f "${PROFILE_FILE}" ] || return 0
+    local owner mode
+    owner="$(stat -c '%u' "${PROFILE_FILE}" 2>/dev/null || echo invalid)"
+    mode="$(stat -c '%a' "${PROFILE_FILE}" 2>/dev/null || echo invalid)"
+    if [ "${owner}" != "0" ]; then
+        log_msg "Ignoring bridge.env because it is not owned by root"
+        return 0
+    fi
+    case "${mode}" in
+    *[2367][0-9]|*[0-9][2367])
+        log_msg "Ignoring bridge.env because it is group/world writable"
+        return 0
+        ;;
+    esac
+    # The profile is root-owned and not writable by other users.
+    # shellcheck disable=SC1090
+    . "${PROFILE_FILE}"
+}
+
+wait_for_official_music() {
+    local waited=0
+    while [ ! -S "${TARGET_SOCKET}" ] && [ "${waited}" -lt 60 ]; do
+        sleep 1
+        waited=$((waited + 1))
+    done
+    [ -S "${TARGET_SOCKET}" ]
+}
+
+wait_for_source_api() {
+    local waited=0
+    local source_token="${FNMUSIC_SOURCE_SOCKET}.source-token"
+    while { [ ! -S "${FNMUSIC_SOURCE_SOCKET}" ] || [ ! -r "${source_token}" ]; } &&
+        [ "${waited}" -lt 30 ]; do
+        sleep 1
+        waited=$((waited + 1))
+    done
+    [ -S "${FNMUSIC_SOURCE_SOCKET}" ] && [ -r "${source_token}" ]
+}
+
+write_default_profile() {
+    [ -f "${PROFILE_FILE}" ] && return 0
+    mkdir -p "${TRIM_PKGVAR}"
+    umask 077
+    {
+        printf 'FNMUSIC_SOURCES=%q\n' "netease,qq,kugou,kuwo,migu"
+        printf 'FNMUSIC_MAX_ONLINE=%q\n' "30"
+        printf 'FNMUSIC_SEARCH_TIMEOUT=%q\n' "12s"
+        printf 'FNMUSIC_SOCKET_MODE=%q\n' "0666"
+        printf 'FNMUSIC_SOURCE_SOCKET=%q\n' "/var/apps/go-music-dl/target/go-music-dl.sock"
+    } > "${PROFILE_FILE}"
+}

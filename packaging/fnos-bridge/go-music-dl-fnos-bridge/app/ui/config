@@ -1,0 +1,14 @@
+{
+    ".url": {
+        "go-music-dl-fnos-bridge.main": {
+            "title": "音乐下载桥接",
+            "icon": "images/icon_{0}.png",
+            "type": "iframe",
+            "protocol": "",
+            "gatewayPrefix": "/app/go-music-dl-fnos-bridge",
+            "gatewaySocket": "var/run/trim_music.socket",
+            "url": "/app/go-music-dl-fnos-bridge",
+            "allUsers": true
+        }
+    }
+}

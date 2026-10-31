@@ -1,0 +1,27 @@
+[
+  {
+    "stepTitle": "飞牛音乐桥接",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "安装后由应用中心直接启停。音源 Cookie、下载目录和音质请先在 go-music-dl 应用设置中完成配置。"
+      },
+      {
+        "type": "text",
+        "field": "wizard_sources",
+        "label": "在线音源",
+        "initValue": "netease,qq,kugou,kuwo,migu",
+        "rules": [
+          {
+            "required": true,
+            "message": "至少保留一个音源"
+          },
+          {
+            "pattern": "^[a-z0-9_,-]+$",
+            "message": "请使用逗号分隔的音源短名"
+          }
+        ]
+      }
+    ]
+  }
+]

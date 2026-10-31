@@ -1,0 +1,7 @@
+{
+    "defaults": {
+        "run-as": "root"
+    },
+    "username": "go-music-dl-fnos-bridge",
+    "groupname": "go-music-dl-fnos-bridge"
+}

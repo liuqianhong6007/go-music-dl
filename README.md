@@ -61,6 +61,64 @@ Web 模式默认不要求登录即可搜索、播放、下载、浏览歌单 / �
 
 桌面端和移动端 App 内嵌 Web 服务使用 `StartDesktop` 启动，仅监听本机 `127.0.0.1`，并默认关闭 Web 管理员登录流程，避免首次启动时因看不到终端初始化令牌而无法进入应用。
 
+### 飞牛音乐协议桥
+
+飞牛音乐接入由两个独立进程组成：
+
+- `music-dl web --unix-socket ...`：使用 Web 自己的 Unix Socket 时自动挂载
+  受令牌保护的 source API，不再需要额外参数。
+- `fnos-bridge`：接管飞牛音乐 Socket、转换协议和 GUID，不导入 `core`。
+
+桥接相关源码集中在 `internal/fnos-bridge/`，包括协议适配、Socket 接管、
+GUID 映射和 source contract/client；独立入口为 `cmd/fnos-bridge/`。
+
+手工运行时先启动共享 Web/source Socket：
+
+```bash
+./music-dl web --no-browser \
+  --unix-socket /tmp/go-music-dl.sock \
+  --base-path /music
+```
+
+再以 root 启动桥接：
+
+```bash
+sudo ./fnos-bridge \
+  --source-socket /tmp/go-music-dl.sock \
+  --state-file data/fnos-music/guid-map.json
+```
+
+停止桥接或正常收到 `SIGTERM` 时，会把官方 Socket 移回原位置。桥接默认接入
+`netease,qq,kugou,kuwo,migu`，可通过 `--sources` 调整。`settings.db` 中的
+Cookie 和下载目录由 source API 读取，桥接本身不访问数据库。
+
+外部音源歌曲在 App 中点击下载时会进入 go-music-dl 的持久下载队列，文件保存到
+Web 设置中的下载目录。令牌自动保存在 `<Web-Socket>.source-token`，桥接默认从
+Socket 路径推导；只有非标准布局才需要显式传入 `--source-token-file`。
+外部音源失效导致取流失败时，桥接会按歌名、歌手和时长自动尝试其他已配置音源，
+并在成功播放后保持飞牛歌曲 GUID 不变。
+当前 App 通过 `GET /music/api/v1/download/track` 直接取得文件，桥接会等待 NAS
+下载完成后返回同一音频，并兼容 `transcode/prepare`、`status`、`file`、`delete`。
+下载完成后桥接会把文件绑定到扫描入库的官方曲目，并继续处理收藏和任务状态。
+官方本地歌曲的请求仍原样交给飞牛音乐。
+
+发布版本提供独立 FPK：
+
+```text
+go-music-dl-fnos-bridge-<版本>-x86.fpk
+go-music-dl-fnos-bridge-<版本>-arm.fpk
+```
+
+在应用中心先安装 go-music-dl，再安装桥接 FPK。桥接由应用中心直接启停、
+升级和卸载，不需要 systemd 或终端配置。构建 FPK：
+
+```bash
+./packaging/fnos-bridge/build-release.sh
+```
+
+不要与其它接管同一 Socket 的扩展同时启动。在线歌单、推荐和标准音质 HLS
+转码暂未实现；在线收藏、下载任务和官方曲库绑定已经支持。
+
 ### Docker
 
 ```bash

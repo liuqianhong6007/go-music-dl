@@ -106,6 +106,32 @@ func (q *DownloadQueue) Enqueue(requestID string, inputs []DownloadTaskInput) (a
 	return
 }
 
+// TaskByRequestKey returns a visible persisted task by its batch-local request
+// key. It is used by non-Web clients that need to follow a task they enqueued.
+func (q *DownloadQueue) TaskByRequestKey(requestKey string) (DownloadTask, error) {
+	var task DownloadTask
+	err := q.db.Where("request_key = ? AND removed = ?", strings.TrimSpace(requestKey), false).First(&task).Error
+	return task, err
+}
+
+// ActiveTaskBySong finds the waiting/downloading task for one source item and
+// directory. The same identity is used by Enqueue's active-task unique index.
+func (q *DownloadQueue) ActiveTaskBySong(source, id, directory string) (DownloadTask, error) {
+	identity, err := json.Marshal([]string{strings.TrimSpace(source), strings.TrimSpace(id), directory})
+	if err != nil {
+		return DownloadTask{}, err
+	}
+	taskKey := fmt.Sprintf("%x", sha256.Sum256(identity))
+	var task DownloadTask
+	err = q.db.Where(
+		"task_key = ? AND status IN ? AND removed = ?",
+		taskKey,
+		[]string{TaskWaiting, TaskDownloading},
+		false,
+	).Order("id ASC").First(&task).Error
+	return task, err
+}
+
 func (q *DownloadQueue) List(page, size int, status string) ([]DownloadTask, int64, map[string]int64, error) {
 	if page < 1 {
 		page = 1

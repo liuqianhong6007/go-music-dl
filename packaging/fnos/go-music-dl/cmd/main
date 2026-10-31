@@ -9,14 +9,16 @@ SOCKET="${TRIM_APPDEST}/go-music-dl.sock"
 BASE_PATH="/app/go-music-dl"
 LOG_FILE="${TRIM_PKGVAR}/music-dl.log"
 PID_FILE="${TRIM_PKGVAR}/app.pid"
+SETTINGS_DB="${TRIM_PKGVAR}/settings.db"
 
 log_msg() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "${LOG_FILE}"
 }
 
 read_pid() {
-    if [ -r "${PID_FILE}" ]; then
-        head -n 1 "${PID_FILE}" | tr -d '[:space:]'
+    local file="${1:-${PID_FILE}}"
+    if [ -r "${file}" ]; then
+        head -n 1 "${file}" | tr -d '[:space:]'
     fi
 }
 
@@ -50,7 +52,7 @@ start_app() {
 
     # 以应用数据目录作为工作目录，配置库与下载文件都留在应用自己的存储空间内。
     cd "${TRIM_PKGVAR}" || return 1
-    MUSIC_DL_CONFIG_DB="${TRIM_PKGVAR}/settings.db" \
+    MUSIC_DL_CONFIG_DB="${SETTINGS_DB}" \
         "${BIN}" web --no-browser --unix-socket "${SOCKET}" --gateway-auth --require-login --base-path "${BASE_PATH}" \
         >> "${LOG_FILE}" 2>&1 &
     local pid=$!
@@ -95,6 +97,7 @@ stop_app() {
 
     rm -f "${PID_FILE}"
     rm -f "${SOCKET}"
+
     return 0
 }
 

@@ -1,0 +1,10 @@
+#!/bin/bash
+
+set -u
+
+if systemctl is-active --quiet fnmusic-ext.service 2>/dev/null; then
+    echo "fnmusic-ext.service is active and owns the fnOS Music socket. Stop it before installing this bridge." > "${TRIM_TEMP_LOGFILE}"
+    exit 1
+fi
+
+exit 0
